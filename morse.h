@@ -39,6 +39,7 @@
 #include "cac.h"
 #include "pv1.h"
 #include "coredump.h"
+#include "bss_stats.h"
 
 #ifdef CONFIG_MORSE_USER_ACCESS
 #include "uaccess.h"
@@ -51,9 +52,12 @@
 #define MAC80211_VERSION_CODE LINUX_VERSION_CODE
 #endif
 
-#define MORSE_DRIVER_SEMVER_MAJOR 54
-#define MORSE_DRIVER_SEMVER_MINOR 0
-#define MORSE_DRIVER_SEMVER_PATCH 0
+/* Re-Define the IGNORE channel flag, if not defined by the cfg80211 patch.
+ * The flag won't be used by MM81xx.
+ */
+#if defined(__x86_64__)
+#define IEEE80211_CHAN_IGNORE	IEEE80211_CHAN_DISABLED
+#endif
 
 #define MORSE_SEMVER_GET_MAJOR(x) (((x) >> 22) & 0x3FF)
 #define MORSE_SEMVER_GET_MINOR(x) (((x) >> 10) & 0xFFF)
@@ -84,11 +88,19 @@
 
 #define INVALID_BCN_CHANGE_SEQ_NUM 0xFFFF
 
+#define INVALID_VIF_ID 0xFFFF
+
 /**
  * From firmware: Time to trigger chswitch_timer in AP mode after sending
  * last beacon data to firmware in the current channel.
  */
 #define BEACON_REQUEST_GRACE_PERIOD_MS (10)
+
+/**
+ * Value to use for overriding sk_pacing_shift. This influences the kernel's TCP queuing behaviour
+ * and improves TCP throughput.
+ */
+#define SK_PACING_SHIFT (3)
 
 /* Generate a device ID from chip ID, revision and chip type */
 #define MORSE_DEVICE_ID(chip_id, chip_rev, chip_type) \
@@ -109,6 +121,9 @@
 #define KHZ_TO_HZ(x) ((x) * 1000)
 #define MHZ_TO_HZ(x) ((x) * 1000000)
 #define HZ_TO_MHZ(x) ((x) / 1000000)
+#define KHZ100_TO_MHZ(x) ((x) / 10)
+#define KHZ100_TO_KHZ(freq) ((freq) * 100)
+#define KHZ100_TO_HZ(freq) ((freq) * 100000)
 
 #define QDBM_TO_MBM(gain) (((gain) * 100) >> 2)
 #define MBM_TO_QDBM(gain) (((gain) << 2) / 100)
@@ -149,12 +164,12 @@ extern uint test_mode;
 extern char serial[];
 extern char board_config_file[];
 extern u8 macaddr_octet;
-extern u8 enable_otp_check;
+extern bool enable_otp_check;
 extern bool enable_ext_xtal_init;
 extern u8 macaddr[ETH_ALEN];
 extern bool enable_ibss_probe_filtering;
 extern uint ocs_type;
-extern int sdio_reset_time;
+extern uint sdio_reset_time;
 
 /**
  * enum morse_mac_subbands_mode - flags to describe sub-bands handling
@@ -254,6 +269,7 @@ struct morse_ps {
 	struct mutex lock;
 	struct work_struct async_wake_work;
 	struct delayed_work delayed_eval_work;
+	struct completion *awake;
 };
 
 /* Morse ACI map for page metadata */
@@ -333,10 +349,10 @@ struct morse_vendor_info {
 
 /** Morse Private STA record */
 struct morse_sta {
-	/** pointer to next morse_sta's and used only in AP mode */
-	struct list_head list;
-	/** Whether we saw an assoc request when already associated */
-	bool already_assoc_req;
+	/** virtual interface this sta is on */
+	const struct ieee80211_vif *vif;
+	/** Count of how many association requests we have received while associating */
+	u8 assoc_req_count;
 	/** When to timeout this record (used in backup) */
 	unsigned long timeout;
 	/** The address of this sta */
@@ -406,6 +422,12 @@ struct morse_sta {
 	 *  capabilities and supported channel width.
 	 */
 	u8 s1g_cap0;
+
+	/** RAW Priority, extracted from QoS traffic capability IE */
+	u8 raw_priority;
+
+	/** STA entry is in BSS statistics module */
+	struct morse_bss_stats_sta bss_stats_sta;
 };
 
 /** Number of bits in AID bitmap.
@@ -421,11 +443,10 @@ struct morse_ap {
 	u16 num_stas;
 	/** Largest AID currently in use */
 	u16 largest_aid;
-	/** list of morse_sta's associated */
-	struct list_head stas;
-	/* RAW state */
+	/** RAW state */
 	struct morse_raw raw;
-
+	/** BSS statistics */
+	struct morse_bss_stats_context bss_stats;
 	/**
 	 * Bitmap of AIDs currently in use. Bit position corresponds to the AID.
 	 */
@@ -848,6 +869,23 @@ struct morse_vif {
 		 */
 		int addr_cnt;
 	} arp_filter;
+
+	/** @stypes: Registered frame subtypes for this interface (fullmac only). */
+	u32 stypes;
+
+#ifdef CONFIG_ANDROID
+	struct {
+		/**
+		 * Flag to indicate whether APF is enabled or not.
+		 */
+		bool enabled;
+
+		/**
+		 * Maximum length of the APF memory in bytes.
+		 */
+		u32 max_length;
+	} apf;
+#endif
 };
 
 struct morse_debug {
@@ -940,7 +978,7 @@ struct morse_channel_survey {
 
 struct morse_watchdog {
 	struct hrtimer timer;
-	int interval_secs;
+	uint interval_secs;
 	watchdog_callback_t ping;
 	int consumers;
 	/* Serialise use of watchdog functions */
@@ -1149,6 +1187,10 @@ struct morse {
 	int rts_threshold;
 #endif
 	struct morse_vif mon_if;	/* monitor interface */
+	/**
+	 * @monitor_mode: Whether the device is operating in monitor mode.
+	 */
+	bool monitor_mode;
 
 	struct morse_hw_cfg *cfg;
 	const struct morse_bus_ops *bus_ops;
@@ -1218,6 +1260,20 @@ struct morse {
 		 */
 		int n_ifaces_using;
 	} pre_assoc_peers;
+
+	struct {
+		/* Used to protect modification of clock update completion */
+		struct mutex update_wait_lock;
+		/* Used to wait on clock updates */
+		struct completion *update;
+		/* RCU protected clock reference. Do not access directly, go through
+		 * morse_hw_clock_xxx API.
+		 */
+		struct morse_hw_clock __rcu *clock;
+	} hw_clock;
+
+	/* Used to wait for firmware attach */
+	struct completion *attach_done;
 
 	/* must be last */
 	u8 drv_priv[] __aligned(sizeof(void *));
@@ -1299,6 +1355,11 @@ static inline struct morse_vif *ieee80211_vif_to_morse_vif(struct ieee80211_vif 
 static inline struct morse *morse_vif_to_morse(struct morse_vif *mors_vif)
 {
 	return container_of(mors_vif->custom_configs, struct morse, custom_configs);
+}
+
+static inline struct ieee80211_sta *morse_sta_to_ieee80211_sta(struct morse_sta *msta)
+{
+	return container_of((void *)msta, struct ieee80211_sta, drv_priv);
 }
 
 static inline bool morse_test_mode_is_interactive(uint test_mode)

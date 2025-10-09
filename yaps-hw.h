@@ -46,7 +46,6 @@ struct morse_yaps_hw_table {
 struct morse;
 
 int morse_yaps_hw_init(struct morse *mors);
-void morse_yaps_hw_yaps_flush_tx_data(struct morse *mors);
 void morse_yaps_hw_finish(struct morse *mors);
 void morse_yaps_hw_read_table(struct morse *mors, struct morse_yaps_hw_table *tbl_ptr);
 

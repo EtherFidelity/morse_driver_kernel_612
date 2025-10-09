@@ -11,19 +11,11 @@
 #include <linux/workqueue.h>
 #include "morse.h"
 #include "morse_commands.h"
+#include "wiphy.h"
 
 #define MORSE_CMD_IS_REQ(cmd)	(le16_to_cpu((cmd)->hdr.flags) & MORSE_CMD_TYPE_REQ)
 #define MORSE_CMD_IS_RESP(cmd)	(le16_to_cpu((cmd)->hdr.flags) & MORSE_CMD_TYPE_RESP)
 #define MORSE_CMD_IS_EVT(cmd)	(le16_to_cpu((cmd)->hdr.flags) & MORSE_CMD_TYPE_EVT)
-
-/* Firmware will not change currently set bandwidth */
-#define DEFAULT_BANDWIDTH 0xFF
-
-/* Firmware will not change currently set frequency */
-#define DEFAULT_FREQUENCY 0xFFFFFFFF
-
-/* Firmware will not change currently set 1mhz channel index */
-#define DEFAULT_1MHZ_PRIMARY_CHANNEL_INDEX 0xFF
 
 /* Default IBSS ACK Timeout adjustment in usecs */
 #define DEFAULT_MORSE_IBSS_ACK_TIMEOUT_ADJUST_US (1000)
@@ -85,12 +77,37 @@ int morse_cmd_add_if(struct morse *mors, u16 *id, const u8 *addr, enum nl80211_i
 int morse_cmd_rm_if(struct morse *mors, u16 id);
 int morse_cmd_resp_process(struct morse *mors, struct sk_buff *skb);
 int morse_cmd_cfg_bss(struct morse *mors, u16 id, u16 beacon_int, u16 dtim_period, u32 cssid);
-int morse_req_vendor(struct morse *mors, struct ieee80211_vif *vif,
+
+/**
+ * morse_cmd_vendor() - Handle vendor command sent to the virtual interface (e.g. wlan0)
+ *
+ * @mors: morse chip struct
+ * @mors_vif: morse interface
+ * @cmd: vendor command request
+ * @cmd_len: length of the request
+ * @resp: vendor command response
+ * @resp_len: length of the response
+ *
+ * @return 0 on success, else error code
+ */
+int morse_cmd_vendor(struct morse *mors, struct morse_vif *mors_vif,
 		     const struct morse_cmd_req_vendor *cmd, int cmd_len,
 		     struct morse_cmd_resp_vendor *resp, int *resp_len);
-int morse_wiphy_cmd_vendor(struct morse *mors,
-		     const struct morse_cmd_req_vendor *cmd, int cmd_len,
-		     struct morse_cmd_resp_vendor *resp, int *resp_len);
+
+/**
+ * morse_hw_cmd_vendor() - Handle vendor command sent to the wireless device (e.g. phy0)
+ *
+ * @mors: morse chip struct
+ * @cmd: vendor command request
+ * @cmd_len: length of the request
+ * @resp: vendor command response
+ * @resp_len: length of the response
+ *
+ * @return 0 on success, else error code
+ */
+int morse_hw_cmd_vendor(struct morse *mors,
+			const struct morse_cmd_req_vendor *cmd, int cmd_len,
+			struct morse_cmd_resp_vendor *resp, int *resp_len);
 int morse_cmd_set_channel(struct morse *mors, u32 op_chan_freq_hz,
 			  u8 pri_1mhz_chan_idx, u8 op_bw_mhz, u8 pri_bw_mhz, s32 *power_dbm);
 int morse_cmd_get_current_channel(struct morse *mors, u32 *op_chan_freq_hz,
@@ -240,12 +257,39 @@ int morse_cmd_set_rts_threshold(struct morse *mors, u32 rts_threshold);
 int morse_cmd_start_scan(struct morse *mors, u8 n_ssids, const u8 *ssid, size_t ssid_len,
 			 const u8 *extra_ies, size_t extra_ies_len, u32 dwell_time_ms);
 int morse_cmd_abort_scan(struct morse *mors);
-int morse_cmd_connect(struct morse *mors, const u8 *ssid, size_t ssid_len,
-		      enum nl80211_auth_type auth_type,
-		      const u8 *sae_pwd, size_t sae_pwd_len);
+int morse_cmd_connect(struct morse *mors, const struct morse_wiphy_connect_params *params);
 int morse_cmd_disconnect(struct morse *mors);
 int morse_cmd_get_connection_state(struct morse *mors, s8 *signal,
 				   u32 *connected_time_s, u8 *dtim_period,
 				   u16 *beacon_interval_tu);
+int morse_cmd_set_cqm_rssi(struct morse *mors, u16 vif_id, s32 cqm_rssi_thold, u32 cqm_rssi_hyst);
+
+/**
+ * morse_cmd_get_apf_capabilities() - Get APF capabilities supported by firmware.
+ *
+ * @mors: Morse structure
+ * @mors_vif: Pointer to morse vif struct.
+ * @version: APF version
+ * @max_len: Maximum length of the memory allocated for APF
+ *
+ * Return: 0 on success, else error code
+ */
+int morse_cmd_get_apf_capabilities(struct morse *mors, struct morse_vif *mors_vif,
+								   u32 *version, u32 *max_len);
+
+/**
+ * morse_cmd_read_write_apf() - Read or Write into APF memory
+ *
+ * @mors: Morse structure
+ * @mors_vif: Pointer to morse vif struct.
+ * @write: Indicates whether to read or write into packet filtering memory
+ * @program_len: Length of the filter in bytes and valid only when write is set to 1
+ * @program: Points to filter bytecode when write is set 1
+ * @offset:  Offset in bytes within APF memory. Valid only when write is set to 0
+ *
+ * Return: 0 on success, else error code
+ */
+int morse_cmd_read_write_apf(struct morse *mors, struct morse_vif *mors_vif, bool write,
+							 u16 program_len, u8 *program, u32 offset);
 
 #endif /* !_MORSE_COMMAND_H_ */

@@ -25,6 +25,7 @@ struct morse;
  *		correctly initialised
  * The remaining five options register the LED with the kernel subsystem LED callbacks
  *	- TX and RX indicate there is network traffic
+ *	- TPT flashes based on traffic with faster flashing for higher throughput
  *	- ASSOC indicates that the station has associated (STA only)
  *	- RADIO indicates that the RF is up/down
  *	- USER_DEF registers the LED with mac80211 but does not set a default behaviour
@@ -34,6 +35,7 @@ struct morse;
 enum led_mode {
 	MORSE_LED_DISABLED,
 	MORSE_LED_HOST,
+	MORSE_LED_TPT,
 	MORSE_LED_TX,
 	MORSE_LED_RX,
 	MORSE_LED_ASSOC,

@@ -57,8 +57,9 @@ void morse_rc_sta_fill_tx_rates(struct morse *mors,
 				struct sk_buff *skb,
 				struct ieee80211_sta *sta, int tx_bw, bool rts_allowed);
 
-void morse_rc_sta_feedback_rates(struct morse *mors,
-				 struct sk_buff *skb, struct morse_skb_tx_status *tx_sts);
+void morse_rc_sta_feedback_rates(struct morse *mors, struct sk_buff *skb,
+				 struct ieee80211_sta *sta, struct morse_skb_tx_status *tx_sts,
+				 int tx_attempts);
 
 void morse_rc_sta_state_check(struct morse *mors,
 			      struct ieee80211_vif *vif, struct ieee80211_sta *sta,

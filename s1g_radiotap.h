@@ -17,7 +17,10 @@
 #define IEEE80211_RADIOTAP_HALOW_FLAGS_S1G_NDP_MANAGEMENT 0x00f0
 #define IEEE80211_RADIOTAP_HALOW_FLAGS_S1G		0x0001
 #define IEEE80211_RADIOTAP_HALOW_FLAGS_NDP		0x0010
-#define IEEE80211_RADIOTAP_HALOW_TLV			0x001C
+
+#ifndef IEEE80211_RADIOTAP_TLVS
+#define IEEE80211_RADIOTAP_TLVS 28
+#endif
 
 /* For S1G radiotap TLV */
 #define DOT11_RT_TLV_S1G_TYPE			32
@@ -88,6 +91,46 @@ struct radiotap_s1g_tlv {
 	__le16 known;
 	__le16 data1;
 	__le16 data2;
+	/* Padding to 4 byte boundary*/
+	u8 __padding[2];
+} __packed;
+
+/**
+ * struct radiotap_vendor_tlv_hdr - Radiotap vendor TLV header
+ * @type: Vendor TLV type; must be IEEE80211_RADIOTAP_VENDOR_NAMESPACE
+ * @length: Length of the vendor-specific tlv (excluding padding). Calculation:
+ *          sizeof(oui) + sizeof(subtype) + sizeof(vendor_type) +
+ *          sizeof(reserved) + sizeof(vendor_data).
+ * @oui: Organizationally Unique Identifier (3 octets)
+ * @subtype: Vendor subtype identifier
+ * @vendor_type: Vendor-specific type field
+ * @reserved: Reserved; for alignment
+ */
+struct radiotap_vendor_tlv_hdr {
+	__le16 type;
+	__le16 length;
+	u8 oui[3];
+	u8 subtype;
+	__le16 vendor_type;
+	__le16 reserved;
+};
+
+/* Morse vendor TLVs */
+/* Morse vendor TLV sub namespace 0 */
+#define MORSE_VENDOR_TLV_SUBNS_0	0
+
+/* Morse frequency kHz TLV info */
+#define MORSE_VENDOR_TLV_FREQ_KHZ_TYPE	35
+#define MORSE_VENDOR_TLV_FREQ_KHZ_SIZE	12
+
+/**
+ * struct radiotap_morse_freq_khz - Morse radiotap TLV for frequency in kHz
+ * @hdr: Vendor TLV header
+ * @freq_khz: Frequency in kHz
+ */
+struct radiotap_morse_freq_khz {
+	struct radiotap_vendor_tlv_hdr hdr;
+	__le32 freq_khz;
 } __packed;
 
 #endif /* !_MORSE_S1G_RADIOTAP_H_ */

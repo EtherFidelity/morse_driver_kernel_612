@@ -631,41 +631,35 @@ static void morse_convert_pv1_to_pv0_qos_ctrl(u8 *qos, u16 fc)
 		qos[0] |= IEEE80211_QOS_CTL_ACK_POLICY_NOACK;
 }
 
-/**
- * morse_pv1_find_sta_by_aid - Get STA context of AP based on STA AID, derived
- *				from SID of PV1 header
- *
- * @mors_vif:	AP interface
- * @aid:	Association ID of STA
- *
- * @return:	STA context structure
- *
- * @note:	The RCU lock must be held when calling this function and while using the returned
- *		pointer.
- */
-static struct ieee80211_sta *morse_pv1_find_sta_by_aid(struct morse_vif *mors_vif, u16 aid)
+struct pv1_find_sta_aid_iter {
+	const struct ieee80211_vif *on_vif;
+	u8 aid;
+	struct ieee80211_sta *out_sta;
+};
+
+static void pv1_find_sta_by_aid(void *data, struct ieee80211_sta *sta)
 {
-	struct list_head *morse_sta_list = &mors_vif->ap->stas;
-	struct list_head *pos;
+	struct pv1_find_sta_aid_iter *iter_data = data;
+	struct morse_sta *msta = (struct morse_sta *)sta->drv_priv;
 
-	list_for_each(pos, morse_sta_list) {
-		struct morse_sta *msta = list_entry(pos, struct morse_sta, list);
-
-		if (msta) {
-			struct ieee80211_sta *sta =
-				container_of((void *)msta, struct ieee80211_sta, drv_priv);
-			if (sta->aid == aid)
-				return sta;
-		}
+	if (!msta) {
+		MORSE_WARN_ON(FEATURE_ID_MESH, 1);
+		return;
 	}
 
-	return NULL;
+	if (msta->vif != iter_data->on_vif)
+		return;
+
+	MORSE_WARN_ON(FEATURE_ID_DEFAULT, iter_data->out_sta); /* already found */
+	if (sta->aid == iter_data->aid)
+		iter_data->out_sta = sta;
 }
 
 struct ieee80211_sta *morse_pv1_find_sta(struct ieee80211_vif *vif,
 				struct dot11ah_mac_pv1_hdr *pv1_hdr)
 {
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
+	struct morse *mors = morse_vif_to_morse(mors_vif);
 	u16 pv1_fc = le16_to_cpu(pv1_hdr->frame_ctrl);
 	u16 pv1_fc_type = le16_to_cpu(pv1_hdr->frame_ctrl) & IEEE80211_PV1_FCTL_FTYPE;
 	struct ieee80211_sta *sta = NULL;
@@ -682,10 +676,18 @@ struct ieee80211_sta *morse_pv1_find_sta(struct ieee80211_vif *vif,
 			sid = le16_to_cpu(sid_header->u.to_ds.addr2_sid);
 		aid = sid & DOT11_MAC_PV1_SID_AID_MASK;
 
-		if (vif->type == NL80211_IFTYPE_AP)
-			sta = morse_pv1_find_sta_by_aid(mors_vif, aid);
-		else if (vif->type == NL80211_IFTYPE_STATION)
+		if (vif->type == NL80211_IFTYPE_AP) {
+			struct pv1_find_sta_aid_iter data = {
+				.on_vif = vif,
+				.aid = aid,
+				.out_sta = NULL,
+			};
+
+			ieee80211_iterate_stations_atomic(mors->hw, pv1_find_sta_by_aid, &data);
+			sta = data.out_sta;
+		} else if (vif->type == NL80211_IFTYPE_STATION) {
 			sta = ieee80211_find_sta(vif, vif->bss_conf.bssid);
+		}
 	} else if (pv1_fc_type == DOT11_MAC_PV1_FRAME_TYPE_QOS_DATA) {
 		struct dot11ah_mac_pv1_qos_data_hdr *qos_data_hdr =
 				(struct dot11ah_mac_pv1_qos_data_hdr *)pv1_hdr;

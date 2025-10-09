@@ -51,6 +51,8 @@ int morse_ocs_cmd_post_process(struct morse_vif *mors_vif,
 		config->slot_definition.num_slots = 1;
 		config->slot_definition.slot_duration_us = MORSE_OCS_DURATION;
 	}
+	/* Set the dynamic beacon index value to default to identify PRAW config as static */
+	config->dynamic.insert_at_idx = U16_MAX;
 
 	/* Enable RAW config */
 	morse_raw_activate_config(raw, config);
@@ -81,7 +83,7 @@ int morse_evt_ocs_done(struct morse_vif *mors_vif, struct morse_cmd_evt_ocs_done
 
 		mutex_lock(&raw->lock);
 		config = morse_raw_find_config_by_id(raw, MORSE_OCS_RAW_IDX);
-		morse_raw_deactivate_config(config);
+		morse_raw_deactivate_config(raw, config);
 		mutex_unlock(&raw->lock);
 
 		/* Update RPS IE with new configuration. */

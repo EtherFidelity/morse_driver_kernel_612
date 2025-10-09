@@ -92,6 +92,8 @@ enum morse_hw_scan_state {
 	HW_SCAN_STATE_ABORTING,
 	/** HW scan is scheduled scanning */
 	HW_SCAN_STATE_SCHED,
+	/** HW scan is stopping scheduled scans */
+	HW_SCAN_STATE_SCHED_STOPPING,
 };
 
 /**
@@ -249,12 +251,14 @@ void morse_hw_scan_init(struct morse *mors);
 void morse_hw_scan_destroy(struct morse *mors);
 
 /**
- * morse_hw_sched_scan_interrupt - Interrupt a scheduled scan and wait for the firmware
- *                                 to clean up. Notify upper layers of decision to stop.
+ * morse_hw_stop_sched_scan - Stop a scheduled scan and wait for the firmware
+ *                            to clean up. Notify upper layers of decision to stop
+ *                            only if they didn't request it.
  *
  * @mors: morse context
+ * @requested: true if the stop request came from mac80211 else false
  */
-void morse_hw_sched_scan_interrupt(struct morse *mors);
+void morse_hw_stop_sched_scan(struct morse *mors, bool requested);
 
 /**
  * morse_hw_sched_scan_finish - Forcibly complete a sched scan without waiting for

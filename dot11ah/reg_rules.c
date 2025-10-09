@@ -51,18 +51,40 @@ static struct morse_regdomain mors_ca_regdom = {
 
 struct morse_reg_rule eu_reg_rules[] = {
 	/* S1G Actual Frequencies */
-	_MRR(863, 865, 1, 0, 16, AUTO_BW,  1000,   280, false, 0, 0, 0),
-	_MRR(865, 868, 1, 0, 16, AUTO_BW,  1000,   280, false, 0, 0, 0),
+	_MRR(867, 868, 1, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(863, 865, 2, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(865, 867, 2, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
 
 	/* S1G->11ac Mapped Frequencies */
-	_MRR(5650, 5690,  20, 0, 16, AUTO_BW,  1000,   280, false, 0, 0, 0),
-	_MRR(5170, 5230,  20, 0, 16, AUTO_BW,  1000,   280, false, 0, 0, 0),
+	_MRR(5210, 5230,  20, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(5650, 5690,  40, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(5170, 5210,  40, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
 };
 
 static struct morse_regdomain mors_eu_regdom = {
 	.n_reg_rules = ARRAY_SIZE(eu_reg_rules),
 	.alpha2 = CHANNEL_ALPHA_EU,
 	.reg_rules = eu_reg_rules
+};
+
+struct morse_reg_rule gb_reg_rules[] = {
+	/* S1G Actual Frequencies */
+	_MRR(867, 868, 1, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR_KHZ(917400, 919400, 1000, 0, 16, AUTO_BW,  1000,   280, false, 0, 0, 0),
+	_MRR(863, 865, 2, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(865, 867, 2, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+
+	/* S1G->11ac Mapped Frequencies */
+	_MRR(5210, 5230,  20, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(5610, 5650,  20, 0, 16, AUTO_BW,  1000,   280, false, 0, 0, 0),
+	_MRR(5650, 5690,  40, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+	_MRR(5170, 5210,  40, 0, 16, AUTO_BW, 10000, 10000, false, 0, 0, 0),
+};
+
+static struct morse_regdomain mors_gb_regdom = {
+	.n_reg_rules = ARRAY_SIZE(gb_reg_rules),
+	.alpha2 = CHANNEL_ALPHA_GB,
+	.reg_rules = gb_reg_rules
 };
 
 struct morse_reg_rule in_reg_rules[] = {
@@ -181,6 +203,7 @@ static struct morse_regdomain *mors_regions[] = {
 	&mors_au_regdom,
 	&mors_ca_regdom,
 	&mors_eu_regdom,
+	&mors_gb_regdom,
 	&mors_in_regdom,
 	&mors_jp_regdom,
 	&mors_kr_regdom,

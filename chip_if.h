@@ -15,7 +15,8 @@
 
 /** Chip IF interrupt mask. We may use any interrupts in this range */
 #define MORSE_CHIP_IF_IRQ_MASK_ALL	(GENMASK(13, 0) | \
-			MORSE_PAGER_IRQ_BYPASS_TX_STATUS_AVAILABLE)
+			MORSE_PAGER_IRQ_BYPASS_TX_STATUS_AVAILABLE | \
+			MORSE_PAGER_IRQ_BYPASS_CMD_RESP_AVAILABLE)
 
 enum morse_chip_if_flags {
 	MORSE_CHIP_IF_FLAGS_DIR_TO_HOST = BIT(0),
@@ -42,6 +43,7 @@ enum morse_chip_if_event_flags {
 	MORSE_TX_PACKET_FREED_UP_PEND,
 	MORSE_DATA_TRAFFIC_PAUSE_PEND,
 	MORSE_DATA_TRAFFIC_RESUME_PEND,
+	MORSE_UPDATE_HW_CLOCK_REFERENCE,
 };
 
 struct chip_if_ops {
@@ -55,11 +57,27 @@ struct chip_if_ops {
 	int (*init)(struct morse *mors);
 
 	/**
+	 * Initialises the chip interface after hardware restart
+	 *
+	 * @mors: Morse chip struct
+	 *
+	 * @return: Error code
+	 */
+	int (*hw_restarted)(struct morse *mors);
+
+	/**
 	 * Flush all tx data queues.
 	 *
 	 * @mors: Morse chip struct
 	 */
 	void (*flush_tx_data)(struct morse *mors);
+
+	/**
+	 * Flush all cmd queues.
+	 *
+	 * @mors: Morse chip struct
+	 */
+	void (*flush_cmds)(struct morse *mors);
 
 	/**
 	 * Cleans up chip interface.
@@ -75,13 +93,6 @@ struct chip_if_ops {
 	 * @num_qs: Pointer to store count of items in queue array
 	 */
 	void (*skbq_get_tx_qs)(struct morse *mors, struct morse_skbq **qs, int *num_qs);
-
-	/**
-	 * Closes any relevant part of the chip interface
-	 * for talking to the higher-level skbq.
-	 * @mq: Queue being closed
-	 */
-	void (*skbq_close)(struct morse_skbq *mq);
 
 	/**
 	 * Gets the command skbq
@@ -156,9 +167,18 @@ struct morse_chip_if_state {
 			struct morse_pageset *pagesets;
 			struct morse_pageset *to_chip_pageset;
 			struct morse_pageset *from_chip_pageset;
-			u32 tx_status_addr_location;
-			DECLARE_KFIFO(tx_status_addrs, u32,
-				       MORSE_PAGER_BYPASS_TX_STATUS_FIFO_DEPTH);
+			struct {
+				struct {
+					u32 location;
+					DECLARE_KFIFO(to_process, u32,
+						      MORSE_PAGER_BYPASS_TX_STATUS_FIFO_DEPTH);
+				} tx_sts;
+				struct {
+					u32 location;
+					DECLARE_KFIFO(to_process, u32,
+						      MORSE_PAGER_BYPASS_CMD_RESP_FIFO_DEPTH);
+				} cmd_resp;
+			} bypass;
 			struct morse_pager_pkt_memory pkt_memory;
 		};
 		struct {

@@ -16,13 +16,6 @@
 /* The maximum number of frames to send after a DTIM to firmware */
 #define MORSE_MAX_MC_FRAMES_AFTER_DTIM (10)
 
-/* Re-Define the IGNORE channel flag, if not defined by the cfg80211 patch.
- * The flag won't be used by MM81xx.
- */
-#if defined(__x86_64__)
-#define IEEE80211_CHAN_IGNORE	IEEE80211_CHAN_DISABLED
-#endif
-
 /**
  * struct morse_queue_params - QoS parameters
  *
@@ -314,6 +307,25 @@ static inline u32 morse_vif_generate_cssid(struct ieee80211_vif *vif)
 }
 
 /**
+ * @brief Notify RSSI event to mac80211
+ *
+ * @param vif Interface pointer to VIF
+ * @param event The RSSI event
+ * @param rssi Current RSSI level
+ * @param gfp context flags
+ */
+static inline void morse_mac_cqm_rssi_notify(struct ieee80211_vif *vif,
+					enum nl80211_cqm_rssi_threshold_event event, s32 rssi,
+					gfp_t gfp)
+{
+#if KERNEL_VERSION(4, 11, 0) <= MAC80211_VERSION_CODE
+	ieee80211_cqm_rssi_notify(vif, event, rssi, GFP_KERNEL);
+#else
+	ieee80211_cqm_rssi_notify(vif, event, GFP_KERNEL);
+#endif
+}
+
+/**
  * @brief Check if MESH config is enabled and set in interface modes
  *
  * @param wiphy the wiphy device registered with cfg80211
@@ -327,8 +339,8 @@ static inline bool morse_mac_mesh_enabled(struct wiphy *wiphy)
 }
 
 bool morse_mac_is_subband_enable(void);
-int morse_mac_get_max_rate_tries(void);
-int morse_mac_get_max_rate(void);
+uint morse_mac_get_max_rate_tries(void);
+uint morse_mac_get_max_rate(void);
 
 int morse_mac_get_watchdog_interval_secs(void);
 
@@ -337,6 +349,9 @@ int morse_mac_send_vendor_wake_action_frame(struct morse *mors, const u8 *dest_a
 
 int morse_mac_traffic_control(struct morse *mors, int interface_id,
 			      bool pause_data_traffic, int sources);
+
+int morse_cqm_rssi_notify_event(struct morse *mors, struct ieee80211_vif *vif,
+		struct morse_cmd_evt_cqm_rssi_notify *cqm_notify);
 
 /**
  * Function for filling the Tx meta info (rate info) for driver
@@ -383,6 +398,16 @@ u8 *morse_mac_get_ie_pos(struct sk_buff *skb, int *ies_len, int *header_length, 
  * Return: 0 on success, else relevant error
  */
 int morse_mac_tx_mgmt_frame(struct ieee80211_vif *vif, struct sk_buff *skb);
+
+/**
+ * morse_mac_get_tx_attempts - Utility func to calculate tx attempts from status
+ *
+ * @mors: pointer to morse struct
+ * @tx_sts: Tx status
+ *
+ * Return: 0 on success, else relevant error
+ */
+int morse_mac_get_tx_attempts(struct morse *mors, struct morse_skb_tx_status *tx_sts);
 
 /**
  * morse_mac_process_tx_finish - Process Tx completion of frames

@@ -45,6 +45,10 @@
 #define MM8108_REG_GPIO_OUTPUT_VALUE_SET_ADDR	0x1368
 #define MM8108_REG_GPIO_OUTPUT_VALUE_CLR_ADDR	0x136c
 
+/* PMU CTRL */
+#define MM8108_REG_AON_PMU_CTRL_MASK            0x00000080
+#define MM8108_REG_AON_PMU_CTRL_ADDR            0x00405020
+
 /* Slow RC clock */
 #define MM8108_REG_RC_CLK_POWER_OFF_ADDR	0x00405020
 #define MM8108_REG_RC_CLK_POWER_OFF_MASK	0x00000040
@@ -55,6 +59,10 @@
 #define MM8108_SPI_INTER_BLOCK_DELAY_BURST4_NS	15000
 #define MM8108_SPI_INTER_BLOCK_DELAY_BURST2_NS	30000
 #define MM8108_SPI_INTER_BLOCK_DELAY_BURST0_NS	58000
+
+/* 64bit hardware clock registers (microsecond tick) */
+#define MM8108_REG_APPS_CLINT_MTIME_MTIME_0_ADDR 0x4140
+#define MM8108_REG_APPS_CLINT_MTIME_MTIME_1_ADDR 0x4144
 
 /* Read OTP value */
 #define MM8108_REG_OTPCTRL_PLDO			0x00004014
@@ -329,15 +337,44 @@ exit:
 	return ret;
 }
 
+static int mm810x_disable_pmu_ctrl_cpu(struct morse *mors)
+{
+	u32 aon_reg_value;
+	int ret = 0;
+
+	MORSE_INFO(mors, "Disabling PMU contol to CPU\n");
+
+	ret = morse_reg32_read(mors, MM8108_REG_AON_PMU_CTRL_ADDR, &aon_reg_value);
+	if (ret)
+		goto exit;
+
+	aon_reg_value &= ~MM8108_REG_AON_PMU_CTRL_MASK;
+	ret = morse_reg32_write(mors, MM8108_REG_AON_PMU_CTRL_ADDR, aon_reg_value);
+	if (ret)
+		goto exit;
+
+	ret = morse_hw_toggle_aon_latch(mors);
+	if (ret)
+		goto exit;
+
+exit:
+	if (ret)
+		MORSE_ERR(mors, "%s failed\n", __func__);
+
+	return ret;
+}
+
 static int mm810x_digital_reset(struct morse *mors)
 {
-	u32 chip_id;
 	int ret = 0;
 
 	morse_claim_bus(mors);
 
 	/* This should be the first step in digital reset, do not reorder */
 	mm810x_enable_internal_slow_clock(mors);
+
+	/* Disable PMU control to CPU before digital reset */
+	mm810x_disable_pmu_ctrl_cpu(mors);
 
 	if (mors->bus_type == MORSE_HOST_BUS_TYPE_USB) {
 #ifdef CONFIG_MORSE_USB
@@ -353,9 +390,6 @@ usb_reset:
 	/* SDIO needs some time after reset */
 	if (sdio_reset_time > 0)
 		msleep(sdio_reset_time);
-
-	/* SW-10325 WAR: dummy read to fix the read/write failures after digital reset on SPI */
-	morse_reg32_read(mors, MORSE_REG_CHIP_ID(mors), &chip_id);
 
 	morse_release_bus(mors);
 
@@ -476,6 +510,29 @@ static void mm810x_post_firmware_ndr_hook(struct morse *mors)
 		mors->bus_ops->config_burst_mode(mors, true);
 }
 
+static int mm810x_gpio_enable_output(struct morse *mors, int pin_num, bool enable)
+{
+	int ret;
+	u32 write_addr = enable ? MM8108_REG_GPIO_OUTPUT_EN_SET_ADDR
+				: MM8108_REG_GPIO_OUTPUT_EN_CLR_ADDR;
+	morse_claim_bus(mors);
+	ret = morse_reg32_write(mors, write_addr, 0x1 << pin_num);
+	morse_release_bus(mors);
+
+	if (ret < 0)
+		MORSE_WARN(mors, "Output enable on GPIO %d failed\n", pin_num);
+	return ret;
+}
+
+static void mm810x_gpio_write_output(struct morse *mors, int pin_num, bool active)
+{
+	u32 write_addr = active ? MM8108_REG_GPIO_OUTPUT_VALUE_SET_ADDR
+				: MM8108_REG_GPIO_OUTPUT_VALUE_CLR_ADDR;
+	morse_claim_bus(mors);
+	morse_reg32_write(mors, write_addr, 0x1 << pin_num);
+	morse_release_bus(mors);
+}
+
 const struct morse_hw_regs mm8108_regs = {
 	/* Register address maps */
 	.irq_base_address = MM8108_REG_INT_BASE,
@@ -518,49 +575,21 @@ const struct morse_hw_regs mm8108_regs = {
 	.aon = MM8108_REG_AON_ADDR,
 	.aon_count = 2,
 
+	/* MTIME registers */
+	.mtime_lower = MM8108_REG_APPS_CLINT_MTIME_MTIME_0_ADDR,
+	.mtime_upper = MM8108_REG_APPS_CLINT_MTIME_MTIME_1_ADDR,
+
 	/* hart0 boot address */
 	.boot_address = MM8108_REG_APPS_BOOT_ADDR,
 };
 
-static int mm810x_gpio_enable_output(struct morse *mors, int pin_num, bool enable)
-{
-	int ret;
-	u32 write_addr = enable ? MM8108_REG_GPIO_OUTPUT_EN_SET_ADDR
-				: MM8108_REG_GPIO_OUTPUT_EN_CLR_ADDR;
-	morse_claim_bus(mors);
-	ret = morse_reg32_write(mors, write_addr, 0x1 << pin_num);
-	morse_release_bus(mors);
-
-	if (ret < 0)
-		MORSE_WARN(mors, "Output enable on GPIO %d failed\n", pin_num);
-	return ret;
-}
-
-static void mm810x_gpio_write_output(struct morse *mors, int pin_num, bool active)
-{
-	u32 write_addr = active ? MM8108_REG_GPIO_OUTPUT_VALUE_SET_ADDR
-				: MM8108_REG_GPIO_OUTPUT_VALUE_CLR_ADDR;
-	morse_claim_bus(mors);
-	morse_reg32_write(mors, write_addr, 0x1 << pin_num);
-	morse_release_bus(mors);
-}
-
 struct morse_hw_cfg mm8108_cfg = {
-	.regs = NULL,
+	.regs = &mm8108_regs,
 	.chip_id_address = MM8108_REG_CHIP_ID,
 	.ops = &morse_yaps_ops,
 	.bus_double_read = false,
 	.enable_short_bcn_as_dtim = true,
 	.led_group.enable_led_support = true,
-	.valid_chip_ids = {
-		MM8108B0_FPGA_ID,
-		MM8108B0_ID,
-		MM8108B1_FPGA_ID,
-		MM8108B1_ID,
-		MM8108B2_FPGA_ID,
-		MM8108B2_ID,
-		CHIP_ID_END
-	},
 	.enable_sdio_burst_mode = mm810x_enable_burst_mode,
 	.digital_reset = mm810x_digital_reset,
 	.get_ps_wakeup_delay_ms = mm810x_get_wakeup_delay_ms,

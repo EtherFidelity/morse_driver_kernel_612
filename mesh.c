@@ -433,6 +433,43 @@ int morse_mac_process_mesh_tx_mgmt(struct morse_vif *mors_vif,
 	return 0;
 }
 
+struct lowest_peer_rssi_iter {
+	const struct ieee80211_vif *on_vif;
+	bool is_set;
+	s16 rssi;
+	u8 peer[ETH_ALEN];
+};
+
+static void peer_with_lowest_rssi(void *data, struct ieee80211_sta *sta)
+{
+	struct lowest_peer_rssi_iter *iter_data = data;
+	struct morse_vif *mors_vif =
+		ieee80211_vif_to_morse_vif((struct ieee80211_vif *)iter_data->on_vif);
+	const struct morse *mors = morse_vif_to_morse(mors_vif);
+	struct morse_sta *msta = (struct morse_sta *)sta->drv_priv;
+
+	if (!msta) {
+		MORSE_WARN_ON(FEATURE_ID_MESH, 1);
+		return;
+	}
+
+	if (msta->vif != iter_data->on_vif)
+		return;
+
+	MORSE_MESH_DBG(mors, "msta %pM with rssi %d and peerings=%u\n",
+		       msta->addr, msta->avg_rssi, msta->mesh_no_of_peerings);
+
+	/* Ignore if number of peerings is 1 */
+	if (msta->mesh_no_of_peerings == 1)
+		return;
+
+	if (!iter_data->is_set || iter_data->rssi > msta->avg_rssi) {
+		iter_data->is_set = true;
+		iter_data->rssi = msta->avg_rssi;
+		memcpy(iter_data->peer, msta->addr, sizeof(iter_data->peer));
+	}
+}
+
 /**
  * morse_mac_check_for_dynamic_peering() - Checks if a link can be established with the
  * new peer by kicking out one of existing peer (with low signal strength).
@@ -447,13 +484,13 @@ static void morse_mac_check_for_dynamic_peering(struct morse_vif *mors_vif, u8 *
 {
 	struct morse_mesh *mesh = mors_vif->mesh;
 	struct morse *mors = morse_vif_to_morse(mors_vif);
-	struct list_head *morse_sta_list = &mors_vif->ap->stas;
-	struct list_head *pos;
-	s16 peer_rssi = 0;
-	u8 *peer_addr = NULL;
 	struct ie_element *mesh_id_ie = &ies_mask->ies[WLAN_EID_MESH_ID];
 	struct ie_element *mesh_conf_ie = &ies_mask->ies[WLAN_EID_MESH_CONFIG];
 	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
+	struct lowest_peer_rssi_iter data = {
+		.is_set = false,
+		.on_vif = vif
+	};
 	bool accept_additional_peer;
 
 	/* Check if number of peers reached the limit */
@@ -478,45 +515,23 @@ static void morse_mac_check_for_dynamic_peering(struct morse_vif *mors_vif, u8 *
 	if (!accept_additional_peer)
 		return;
 
-	rcu_read_lock();
-	/* Find the peer with lowest rssi */
-	list_for_each(pos, morse_sta_list) {
-		struct morse_sta *msta = list_entry(pos, struct morse_sta, list);
-
-		if (!msta) {
-			MORSE_MESH_WARN(mors, "%s: msta NULL\n", __func__);
-			continue;
-		}
-
-		MORSE_MESH_DBG(mors, "msta %pM with rssi %d and peerings=%u\n",
-			       msta->addr, msta->avg_rssi, msta->mesh_no_of_peerings);
-
-		/* Ignore if number of peerings is 1 */
-		if (msta->mesh_no_of_peerings == 1)
-			continue;
-
-		if (!peer_addr || peer_rssi > msta->avg_rssi) {
-			peer_rssi = msta->avg_rssi;
-			peer_addr = msta->addr;
-		}
-	}
-	rcu_read_unlock();
+	ieee80211_iterate_stations_atomic(mors->hw, peer_with_lowest_rssi, &data);
 
 	/* Check if the new peer has better signal than existing peer */
-	if (peer_addr && (peer_rssi + mesh->rssi_margin) < rssi) {
+	if (data.is_set && (data.rssi + mesh->rssi_margin) < rssi) {
 		struct morse_mesh_peer_addr_vendor_evt event;
 		int ret;
 
-		memcpy(event.addr, peer_addr, ETH_ALEN);
+		memcpy(event.addr, data.peer, ETH_ALEN);
 
 		/* New peer has better rssi - indicate peer to supplicant to kick out */
 		ret = morse_vendor_send_peer_addr_event(vif, &event);
 		if (!ret) {
-			memcpy(mesh->kickout_peer_addr, peer_addr, ETH_ALEN);
+			memcpy(mesh->kickout_peer_addr, data.peer, ETH_ALEN);
 			mesh->kickout_ts = jiffies;
 		}
 		MORSE_MESH_INFO(mors, "Kickout Peer %pM rssi %d, new peer %pM rssi %d, ret=%d\n",
-				mesh->kickout_peer_addr, peer_rssi, sa, rssi, ret);
+				mesh->kickout_peer_addr, data.rssi, sa, rssi, ret);
 	}
 }
 

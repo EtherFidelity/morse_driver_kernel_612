@@ -136,4 +136,16 @@ config ANDROID
 	help
 	  Enable to compile driver for android.
 
+config MORSE_MONITOR
+	bool "Monitor mode support"
+	default n
+	help
+	  Enable to monitor traffic in a wireless channel.
+
+config MORSE_DEBUGFS
+	bool "DebugFS support"
+	default n
+	help
+	  Enable for debugging support.
+
 endif # WLAN_VENDOR_MORSE

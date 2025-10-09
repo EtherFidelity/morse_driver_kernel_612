@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  */
+#include "linux/jiffies.h"
 #include <linux/module.h>
 #include <linux/usb.h>
 
@@ -23,6 +24,15 @@
 
 /** Power management runtime auto-suspend delay value in milliseconds */
 #define PM_RUNTIME_AUTOSUSPEND_DELAY_MS 100
+
+/**
+ * URB timeout in milliseconds. If an URB does not complete within this time, it will be killed.
+ *
+ * This timeout needs to account for USB suspend and resume occurring before the URB can be
+ * transferred, and it also needs to account for transferring USB_MAX_TRANSFER_SIZE bytes over a
+ * potentially slow, congested USB Full Speed link.
+ */
+#define URB_TIMEOUT_MS                  250
 
 #define MORSE_USB_DBG(_m, _f, _a...)		morse_dbg(FEATURE_ID_USB, _m, _f, ##_a)
 #define MORSE_USB_INFO(_m, _f, _a...)		morse_info(FEATURE_ID_USB, _m, _f, ##_a)
@@ -290,7 +300,18 @@ static int morse_usb_cmd(struct morse_usb *musb, const char *user_buffer, size_t
 
 		goto error;
 	}
-	wait_event_interruptible(musb->rw_in_wait, (!musb->ongoing_cmd));
+	retval = wait_event_interruptible_timeout(musb->rw_in_wait, (!musb->ongoing_cmd),
+						  msecs_to_jiffies(URB_TIMEOUT_MS));
+	if (retval < 0) {
+		MORSE_USB_ERR(mors, "%s: error waiting for urb %d\n", __func__, retval);
+		goto error;
+	} else if (retval == 0) {
+		MORSE_USB_ERR(mors, "%s: timed out waiting for urb\n", __func__);
+		usb_kill_urb(ep->urb);
+		retval = -ETIMEDOUT;
+		goto error;
+	}
+
 	musb->ongoing_cmd = 0;
 
 	return writesize;
@@ -392,10 +413,14 @@ static int morse_usb_mem_read(struct morse_usb *musb, u32 address, u8 *data, ssi
 		goto error;
 	}
 
-	ret = wait_event_interruptible(musb->rw_in_wait, (!musb->ongoing_rw));
+	ret = wait_event_interruptible_timeout(musb->rw_in_wait, (!musb->ongoing_rw),
+					       msecs_to_jiffies(URB_TIMEOUT_MS));
 	if (ret < 0) {
 		MORSE_USB_ERR(mors, "%s: wait_event_interruptible: error %d\n", __func__, ret);
 		goto error;
+	} else if (ret == 0) {
+		/* Timed out. */
+		usb_kill_urb(musb->endpoints[MORSE_EP_MEM_RD].urb);
 	}
 
 	if (musb->errors) {
@@ -462,10 +487,14 @@ static int morse_usb_mem_write(struct morse_usb *musb, u32 address, u8 *data, ss
 		goto error;
 	}
 
-	ret = wait_event_interruptible(musb->rw_in_wait, (!musb->ongoing_rw));
+	ret = wait_event_interruptible_timeout(musb->rw_in_wait, (!musb->ongoing_rw),
+					       msecs_to_jiffies(URB_TIMEOUT_MS));
 	if (ret < 0) {
 		MORSE_USB_ERR(mors, "%s error %d\n", __func__, ret);
 		goto error;
+	} else if (ret == 0) {
+		/* Timed out. */
+		usb_kill_urb(musb->endpoints[MORSE_EP_MEM_WR].urb);
 	}
 
 	if (musb->errors) {
@@ -661,45 +690,51 @@ static int morse_detect_endpoints(struct morse *mors, const struct usb_interface
 		       musb->endpoints[MORSE_EP_INT].addr);
 
 	/* Verify we have an IN and OUT */
-	if (!(musb->endpoints[MORSE_EP_MEM_RD].addr && musb->endpoints[MORSE_EP_MEM_WR].addr))
-		return -ENODEV;
+	if (!(musb->endpoints[MORSE_EP_MEM_RD].addr && musb->endpoints[MORSE_EP_MEM_WR].addr)) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	/* Verify the stats MORSE_EP_INT is detected */
-	if (!musb->endpoints[MORSE_EP_INT].addr)
-		return -ENODEV;
+	if (!musb->endpoints[MORSE_EP_INT].addr) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	/* Verify minimum interrupt status read */
-	if (musb->endpoints[MORSE_EP_INT].size < 8)
-		return -ENODEV;
+	if (musb->endpoints[MORSE_EP_INT].size < 8) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	musb->endpoints[MORSE_EP_CMD].urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!musb->endpoints[MORSE_EP_CMD].urb) {
 		ret = -ENOMEM;
-		goto err_ep;
+		goto err_free_urb;
 	}
 
 	musb->endpoints[MORSE_EP_MEM_RD].urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!musb->endpoints[MORSE_EP_MEM_RD].urb) {
 		ret = -ENOMEM;
-		goto err_ep;
+		goto err_free_urb;
 	}
 
 	musb->endpoints[MORSE_EP_MEM_WR].urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!musb->endpoints[MORSE_EP_MEM_WR].urb) {
 		ret = -ENOMEM;
-		goto err_ep;
+		goto err_free_urb;
 	}
 
 	musb->endpoints[MORSE_EP_MEM_RD].buffer = kmalloc(USB_MAX_TRANSFER_SIZE, GFP_KERNEL);
 	if (!musb->endpoints[MORSE_EP_MEM_RD].buffer) {
 		ret = -ENOMEM;
-		goto err_ep;
+		goto err_free_urb;
 	}
 
 	musb->endpoints[MORSE_EP_MEM_WR].buffer = kmalloc(USB_MAX_TRANSFER_SIZE, GFP_KERNEL);
-	if (!musb->endpoints[MORSE_EP_MEM_RD].buffer) {
+	if (!musb->endpoints[MORSE_EP_MEM_WR].buffer) {
 		ret = -ENOMEM;
-		goto err_ep;
+		goto err_free_rd_buff;
 	}
 
 	musb->endpoints[MORSE_EP_CMD].buffer =
@@ -708,7 +743,7 @@ static int morse_detect_endpoints(struct morse *mors, const struct usb_interface
 
 	if (!musb->endpoints[MORSE_EP_CMD].buffer) {
 		ret = -ENOMEM;
-		goto err_ep;
+		goto err_free_wr_buff;
 	}
 
 	/* Assign command to memory out end point */
@@ -717,26 +752,26 @@ static int morse_detect_endpoints(struct morse *mors, const struct usb_interface
 
 	return 0;
 
-err_ep:
-	usb_free_coherent(musb->udev, sizeof(struct morse_usb_command),
-			  musb->endpoints[MORSE_EP_CMD].buffer,
-			  musb->endpoints[MORSE_EP_CMD].urb->transfer_dma);
+err_free_wr_buff:
+	kfree(musb->endpoints[MORSE_EP_MEM_WR].buffer);
+err_free_rd_buff:
+	kfree(musb->endpoints[MORSE_EP_MEM_RD].buffer);
+err_free_urb:
+	usb_free_urb(musb->endpoints[MORSE_EP_MEM_WR].urb);
 	usb_free_urb(musb->endpoints[MORSE_EP_MEM_RD].urb);
 	usb_free_urb(musb->endpoints[MORSE_EP_CMD].urb);
-	usb_free_urb(musb->endpoints[MORSE_EP_MEM_WR].urb);
-	kfree(musb->endpoints[MORSE_EP_MEM_RD].buffer);
-	kfree(musb->endpoints[MORSE_EP_MEM_WR].buffer);
-
+err:
 	return ret;
 }
 
 static int morse_usb_probe(struct usb_interface *interface, const struct usb_device_id *id)
 {
 	int ret;
-	u32 chip_id = 0;
 	struct morse *mors;
 	struct morse_usb *musb;
 	struct morse_chip_series *mors_chip_series = (struct morse_chip_series *)id->driver_info;
+	const bool reset_hw = false;
+	const bool reattach_hw = false;
 	/* let the user know what node this device is now attached to */
 	dev_info(&interface->dev,
 		 "USB Morse device now attached to Morse driver (minor=%d)", interface->minor);
@@ -761,7 +796,7 @@ static int morse_usb_probe(struct usb_interface *interface, const struct usb_dev
 	usb_set_intfdata(interface, mors);
 
 	ret = morse_detect_endpoints(mors, interface);
-	if (!mors) {
+	if (ret) {
 		MORSE_USB_ERR(mors, "morse_detect_endpoints failed (%d)\n", ret);
 		goto err_ep;
 	}
@@ -773,22 +808,9 @@ static int morse_usb_probe(struct usb_interface *interface, const struct usb_dev
 		MORSE_USB_ERR(mors, "morse_chip_cfg_detect_and_init failed: %d\n", ret);
 		goto err_ep;
 	}
+	MORSE_USB_INFO(mors, "Morse Micro USB device found, chip ID=0x%04x\n", mors->chip_id);
 
 	mors->cfg->mm_ps_gpios_supported = false;
-
-	ret = morse_usb_reg32_read(mors, MORSE_REG_CHIP_ID(mors), &chip_id);
-	if (ret < 0) {
-		MORSE_USB_ERR(mors, "Read CHIP ID failed (%d)\n", ret);
-		goto err_ep;
-	}
-	MORSE_USB_INFO(mors, "CHIP ID 0x%08x:0x%04x\n", MORSE_REG_CHIP_ID(mors), chip_id);
-	mors->chip_id = chip_id;
-
-	ret = morse_hw_regs_attach(mors->cfg, chip_id);
-	if (ret < 0) {
-		MORSE_USB_ERR(mors, "morse hw regs attach failed: %d\n", ret);
-		goto err_ep;
-	}
 
 #ifdef CONFIG_MORSE_ENABLE_TEST_MODES
 	if (test_mode == MORSE_CONFIG_TEST_MODE_BUS) {
@@ -800,7 +822,7 @@ static int morse_usb_probe(struct usb_interface *interface, const struct usb_dev
 	mors->board_serial = serial;
 	MORSE_USB_INFO(mors, "Board serial: %s", mors->board_serial);
 
-	ret = morse_firmware_init(mors, test_mode);
+	ret = morse_firmware_prepare_and_init(mors, reset_hw, reattach_hw);
 	if (ret)
 		goto err_ep;
 
@@ -911,31 +933,27 @@ static void morse_urb_cleanup(struct morse *mors)
 	struct morse_usb_endpoint *cmd_ep = &musb->endpoints[MORSE_EP_CMD];
 
 	usb_kill_urb(rd_ep->urb);
-
 	usb_kill_urb(wr_ep->urb);
-
 	usb_kill_urb(cmd_ep->urb);
 
 	/* Locking the bus. No USB communication after this point */
 	mutex_lock(&musb->lock);
 
-	usb_free_urb(int_ep->urb);
-
 	if (int_ep->urb)
 		usb_free_coherent(musb->udev, MORSE_EP_INT_BUFFER_SIZE,
 				  int_ep->buffer, int_ep->urb->transfer_dma);
 
-	usb_free_urb(rd_ep->urb);
-	kfree(rd_ep->buffer);
-
-	usb_free_urb(wr_ep->urb);
-	kfree(wr_ep->buffer);
-
-	usb_free_urb(cmd_ep->urb);
-
 	if (cmd_ep->urb)
 		usb_free_coherent(musb->udev, sizeof(struct morse_usb_command),
 				  cmd_ep->buffer, cmd_ep->urb->transfer_dma);
+
+	kfree(wr_ep->buffer);
+	kfree(rd_ep->buffer);
+
+	usb_free_urb(int_ep->urb);
+	usb_free_urb(wr_ep->urb);
+	usb_free_urb(rd_ep->urb);
+	usb_free_urb(cmd_ep->urb);
 }
 
 static void morse_usb_disconnect(struct usb_interface *interface)

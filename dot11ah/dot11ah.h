@@ -384,6 +384,7 @@ enum morse_dot11ah_region {
 	MORSE_AU,
 	MORSE_CA,
 	MORSE_EU,
+	MORSE_GB,
 	MORSE_IN,
 	MORSE_JP,
 	MORSE_KR,
@@ -452,6 +453,10 @@ struct s1g_operation_params_expanded {
 	bool use_mcs10;
 	u8 op_bw;
 };
+
+#define QOS_TRAFFIC_UP_SHIFT	(4)
+#define QOS_TRAFFIC_UP_MASK		(0x70)
+#define QOS_TRAFFIC_CAP_SIZE	(3)
 
 /** CAC control field - 0: centralized control, 1: distributed control */
 #define DOT11AH_S1G_CAC_CONTROL		BIT(0)
@@ -592,6 +597,18 @@ void morse_dot11ah_mask_ies(struct dot11ah_ies_mask *ies_mask, bool mask_ext_cap
 void morse_dot11ah_ies_mask_clear(struct dot11ah_ies_mask *ies_mask);
 
 u8 *morse_dot11_insert_ie_from_ies_mask(u8 *pos, const struct dot11ah_ies_mask *ies_mask, u8 eid);
+
+/**
+ * morse_dot11ah_ies_to_ies_mask()	- Create new ies mask from raw S1G IEs.
+ * @ies: Raw S1G IEs to create ies mask from.
+ * @ies_len: Length of the raw IEs.
+ *
+ * Return: Parsed S1G IEs.
+ *
+ * The caller gets the ownership of the returned structure. It is the caller's responsibility to
+ * free it using morse_dot11ah_ies_mask_free().
+ */
+struct dot11ah_ies_mask *morse_dot11ah_ies_to_ies_mask(const u8 *ies, u16 ies_len);
 
 /**
  * morse_dot11ah_11n_to_s1g_tx_packet() - translate the packet header only in place.
@@ -818,6 +835,14 @@ int morse_dot11ah_get_pri_1mhz_chan(int primary_channel, int primary_channel_wid
 const char *morse_dot11ah_get_region_str(void);
 
 int morse_dot11ah_get_num_channels(void);
+
+/**
+ * @brief Mark S1G channel as disabled
+ * @param S1G operating channel index
+ *
+ * @return ENOENT if channel not found
+ */
+int morse_dot11ah_ignore_channel(int chan_s1g);
 
 const struct morse_regdomain *morse_reg_alpha_lookup(const char *alpha);
 

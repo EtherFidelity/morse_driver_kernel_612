@@ -51,6 +51,10 @@
 #define MM6108_REG_XTAL_INIT_SEQ_ADDR_3_VAL	0x21D	   /* Digpll enable val */
 #define MM6108_REG_XTAL_INIT_SEQ_ADDR_4_VAL	0x1B06	   /* System clk Control val */
 
+/* 64bit hardware clock registers (microsecond tick) */
+#define MM6108_REG_CLINT_MTIME_0_ADDR		0x200bff8
+#define MM6108_REG_CLINT_MTIME_1_ADDR		0x200bffc
+
 /** Delay after initiating digital reset for external xtal init */
 #define MM6108_XTAL_INIT_DIG_RESET_DELAY_MS 50
 /** Extra delay to wait on sdio transactions until the xtal has been initialised */
@@ -304,6 +308,10 @@ static const struct morse_hw_regs mm6108_regs = {
 	.aon = MM6108_REG_AON_ADDR,
 	.aon_count = 2,
 
+	/* MTIME registers */
+	.mtime_lower = MM6108_REG_CLINT_MTIME_0_ADDR,
+	.mtime_upper = MM6108_REG_CLINT_MTIME_1_ADDR,
+
 	/* hart0 boot address */
 	.boot_address = MM6108_REG_APPS_BOOT_ADDR,
 };
@@ -326,11 +334,6 @@ struct morse_hw_cfg mm6108_cfg = {
 	.enable_short_bcn_as_dtim = false,
 	.led_group.enable_led_support = false,
 	.enable_ext_xtal_delay = mm610x_enable_ext_xtal_delay,
-	.valid_chip_ids = {
-			   MM6108A0_ID,
-			   MM6108A1_ID,
-			   MM6108A2_ID,
-			   CHIP_ID_END },
 };
 
 struct morse_chip_series mm61xx_chip_series = {

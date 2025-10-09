@@ -13,8 +13,10 @@
 #include "morse.h"
 #include "debug.h"
 #include "mac.h"
+#include "monitor.h"
 #include "s1g_radiotap.h"
 #include "skb_header.h"
+#include "vendor.h"
 
 #define RT_ZERO_LEN_PSDU_DATA			0x2
 #define RT_ZERO_LEN_PSDU_VENDOR_SPECIFIC	0xff
@@ -134,6 +136,52 @@ static enum dot11_rt_s1g_bandwidth int_bw_to_radiotap_bw_enum(int bw_mhz)
 	return bw;
 }
 
+/**
+ * morse_mon_add_freq_khz_tlv() - add a frequency (kHz) TLV to a radiotap header
+ * @skb: socket buffer to prepend the TLV data to
+ * @hdr_rx_status: Morse rx status struct
+ */
+static void morse_mon_add_freq_khz_tlv(struct sk_buff *skb,
+					  struct morse_skb_rx_status *hdr_rx_status)
+{
+	struct radiotap_morse_freq_khz *freq_tlv;
+
+	freq_tlv = (struct radiotap_morse_freq_khz *)skb_push(skb, sizeof(*freq_tlv));
+	freq_tlv->hdr.type = cpu_to_le16(IEEE80211_RADIOTAP_VENDOR_NAMESPACE);
+	freq_tlv->hdr.length = cpu_to_le16(MORSE_VENDOR_TLV_FREQ_KHZ_SIZE);
+	freq_tlv->hdr.oui[0] = (MORSE_OUI >> 16) & 0xFF;
+	freq_tlv->hdr.oui[1] = (MORSE_OUI >> 8) & 0xFF;
+	freq_tlv->hdr.oui[2] = MORSE_OUI & 0xFF;
+	freq_tlv->hdr.subtype = MORSE_VENDOR_TLV_SUBNS_0;
+	freq_tlv->hdr.vendor_type = cpu_to_le16(MORSE_VENDOR_TLV_FREQ_KHZ_TYPE);
+	freq_tlv->hdr.reserved = 0;
+	freq_tlv->freq_khz = cpu_to_le32(KHZ100_TO_KHZ(le16_to_cpu(hdr_rx_status->freq_100khz)));
+}
+
+/**
+ * morse_mon_add_vendor_tlvs() - add all required vendor TLVs to a radiotap header
+ * @skb: socket buffer to prepend TLV data to
+ * @hdr_rx_status: Morse rx status struct
+ *
+ * Assumes the skb size requirements have already been accounted for
+ */
+static void morse_mon_add_vendor_tlvs(struct sk_buff *skb,
+				      struct morse_skb_rx_status *hdr_rx_status)
+{
+	morse_mon_add_freq_khz_tlv(skb, hdr_rx_status);
+}
+
+/**
+ * morse_mon_vendor_tlv_size() - Get the size of all vendor TLVs
+ *
+ * @returns the total length in bytes of the vendor TLVs to be added by morse_mon_add_vendor_tlvs().
+ *         This is the total length including all padding.
+ */
+static int morse_mon_vendor_tlv_size(void)
+{
+	return sizeof(struct radiotap_morse_freq_khz);
+}
+
 void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 		  struct morse_skb_rx_status *hdr_rx_status)
 {
@@ -148,6 +196,7 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 	int ndp_sub_type;
 	u32 bw_mhz;
 	u8 mcs_index;
+	int morse_vendor_tlv_size = 0;
 	enum dot11_bandwidth bw_idx =
 		morse_ratecode_bw_index_get(hdr_rx_status->morse_ratecode);
 	u32 status_flags = le32_to_cpu(hdr_rx_status->flags);
@@ -196,11 +245,16 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 	} else {
 		int len = sizeof(*hdr) +
 		    sizeof(*ampdu_hdr) + sizeof(*s1g_info_hdr) + sizeof(*align_padding);
+
+		morse_vendor_tlv_size = morse_mon_vendor_tlv_size();
+		len += morse_vendor_tlv_size;
 		skb = skb_copy_expand(rx_skb, len, 0, GFP_KERNEL);
 		if (!skb)
 			return;
 
 		s1g_info_hdr = (struct radiotap_s1g_tlv *)skb_push(skb, sizeof(*s1g_info_hdr));
+
+		morse_mon_add_vendor_tlvs(skb, hdr_rx_status);
 
 		if (status_flags & MORSE_RX_STATUS_FLAGS_AMPDU)
 			ampdu_hdr = (struct ampdu_header *)skb_push(skb, sizeof(*ampdu_hdr));
@@ -209,6 +263,7 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 		 * This is required for most packets, except ndps.
 		 */
 		align_padding = (struct padding *)skb_push(skb, sizeof(*align_padding));
+		align_padding->padding = 0;
 	}
 	bw_mhz = morse_ratecode_bw_index_to_s1g_bw_mhz(bw_idx);
 	mcs_index = morse_ratecode_mcs_index_get(hdr_rx_status->morse_ratecode);
@@ -244,17 +299,22 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 			ppdu_format = DOT11_RT_S1G_PPDU_S1G_1M;
 
 		hdr->hdr.it_present |= cpu_to_le32(BIT(IEEE80211_RADIOTAP_RATE) |
-						   BIT(IEEE80211_RADIOTAP_HALOW_TLV));
+						   BIT(IEEE80211_RADIOTAP_TLVS));
 
 		/* Set MSB of rate so it is interpreted as an MCS index */
 		hdr->rt_rate_or_zl_psdu =
 		    BIT(7) | morse_ratecode_mcs_index_get(hdr_rx_status->morse_ratecode);
 
 		hdr->hdr.it_len = cpu_to_le16(le16_to_cpu(hdr->hdr.it_len)
-						+ sizeof(*s1g_info_hdr) + sizeof(*align_padding));
+						+ sizeof(*s1g_info_hdr)
+						+ sizeof(*align_padding)
+						+ morse_vendor_tlv_size);
 
 		if (status_flags & MORSE_RX_STATUS_FLAGS_FCS_INCLUDED)
 			hdr->rt_flags |= IEEE80211_RADIOTAP_F_FCS;
+
+		if (status_flags & MORSE_RX_STATUS_FLAGS_CRC_ERROR)
+			hdr->rt_flags |= IEEE80211_RADIOTAP_F_BADFCS;
 
 		/* Populate the s1g info rdtp header */
 		/* TODO Parse in RX status info e.g. MCS type */
@@ -283,6 +343,7 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 				DOT11_RT_S1G_DAT2_COLOR_SET(hdr_rx_status->bss_color) |
 				DOT11_RT_S1G_DAT2_UPL_IND_SET(MORSE_RX_STATUS_FLAGS_UPL_IND_GET
 							      (status_flags)));
+		memset(s1g_info_hdr->__padding, 0, sizeof(s1g_info_hdr->__padding));
 	}
 
 	if (status_flags & MORSE_RX_STATUS_FLAGS_AMPDU) {
@@ -297,7 +358,8 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 
 	hdr->rt_dbm_antsignal = (s8)le16_to_cpu(hdr_rx_status->rssi);
 
-	hdr->rt_channel = hdr_rx_status->freq_mhz;
+	/* Need to truncate the 100kHz reported frequency to MHz for radiotap hdr compatibility */
+	hdr->rt_channel = cpu_to_le16(KHZ100_TO_MHZ(le16_to_cpu(hdr_rx_status->freq_100khz)));
 	if (le16_to_cpu(hdr->rt_channel) <= 700)
 		flags = IEEE80211_CHAN_700MHZ;
 	else if (le16_to_cpu(hdr->rt_channel) <= 800)
@@ -314,7 +376,11 @@ void morse_mon_rx(struct morse *mors, struct sk_buff *rx_skb,
 	skb->protocol = htons(ETH_P_802_2);
 	memset(skb->cb, 0, sizeof(skb->cb));
 	/* Push to network interface */
+#if KERNEL_VERSION(5, 18, 0) <= LINUX_VERSION_CODE
 	netif_rx(skb);
+#else
+	netif_rx_ni(skb);
+#endif
 }
 
 void morse_mon_sig_field_error(const struct morse_cmd_evt_sig_field_error *sig_field_error_evt)
@@ -351,7 +417,11 @@ void morse_mon_sig_field_error(const struct morse_cmd_evt_sig_field_error *sig_f
 	skb->protocol = htons(ETH_P_802_2);
 	memset(skb->cb, 0, sizeof(skb->cb));
 	/* Push to network interface */
+#if KERNEL_VERSION(5, 18, 0) <= LINUX_VERSION_CODE
 	netif_rx(skb);
+#else
+	netif_rx_ni(skb);
+#endif
 }
 
 int morse_mon_init(struct morse *mors)

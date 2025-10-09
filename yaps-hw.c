@@ -129,12 +129,18 @@ struct morse_yaps_hw_aux_data {
 
 	u16 reserved_yaps_page_size;
 
-	/* Buffers to/from chip to support large contiguous reads/writes */
+	/* Buffers to/from chip to support large contiguous reads/writes
+	 * Buffers must be aligned before use.
+	 */
 	char *to_chip_buffer;
 	char *from_chip_buffer;
 
-	/* Status registers for queues and aloc pools on chip */
-	struct morse_yaps_status_registers status_regs;
+	/* Status registers for queues and aloc pools on chip
+	 * This structure is filled directly by bus reads, so it is aligned to 8 bytes to support
+	 * MORSE_SDIO_ALIGNMENT of 1, 2, 4 or 8. Stricter alignment requirements will trigger a
+	 * warning in morse_yaps_hw_init().
+	 */
+	struct morse_yaps_status_registers status_regs __aligned(8);
 };
 
 static int yaps_hw_lock(struct morse_yaps *yaps)
@@ -293,7 +299,9 @@ static int morse_yaps_hw_write_pkts(struct morse_yaps *yaps,
 	int ret = 0;
 	int i;
 	u32 delim = 0;
-	char *write_buf = yaps->aux_data->to_chip_buffer;
+	char *to_chip_buffer_aligned = PTR_ALIGN(yaps->aux_data->to_chip_buffer,
+						  yaps->mors->bus_ops->bulk_alignment);
+	char *write_buf = to_chip_buffer_aligned;
 	int tx_len;
 	int batch_txn_len = 0;
 	int pkts_pending = 0;
@@ -314,17 +322,22 @@ static int morse_yaps_hw_write_pkts(struct morse_yaps *yaps,
 
 	/* Batch packets into larger transactions. Send as many as we have space for. */
 	for (i = 0; i < num_pkts; ++i) {
-		tx_len = pkts[i].skb->len + YAPS_CALC_PADDING(pkts[i].skb->len) + sizeof(delim);
+		/* packets are padded with skb_pad.
+		 * Hence, the true size of the packet is not set in skb->len.
+		 */
+		u32 pkt_size = pkts[i].skb->len + YAPS_CALC_PADDING(pkts[i].skb->len);
+
+		tx_len = pkt_size + sizeof(delim);
 
 		/* Send when we have reached window size, don't split pkt over boundary */
 		if ((batch_txn_len + tx_len) > YAPS_HW_WINDOW_SIZE_BYTES) {
 			ret = morse_dm_write(yaps->mors, yaps->aux_data->yds_addr,
-					     yaps->aux_data->to_chip_buffer, batch_txn_len);
+					     to_chip_buffer_aligned, batch_txn_len);
 
 			batch_txn_len = 0;
 			if (ret)
 				goto exit;
-			write_buf = yaps->aux_data->to_chip_buffer;
+			write_buf = to_chip_buffer_aligned;
 			*num_pkts_sent += pkts_pending;
 			pkts_pending = 0;
 		}
@@ -344,8 +357,7 @@ static int morse_yaps_hw_write_pkts(struct morse_yaps *yaps,
 
 		/* Build stream header */
 		/* Always set IRQ for the last packet so the chip doesn't miss it */
-		delim = morse_yaps_delimiter(yaps, pkts[i].skb->len, pkts[i].tc_queue,
-					     delim_irq);
+		delim = morse_yaps_delimiter(yaps, pkt_size, pkts[i].tc_queue, delim_irq);
 		*((__le32 *)write_buf) = cpu_to_le32(delim);
 		memcpy(write_buf + sizeof(delim), pkts[i].skb->data, pkts[i].skb->len);
 
@@ -360,7 +372,7 @@ static int morse_yaps_hw_write_pkts(struct morse_yaps *yaps,
 exit:
 	if (batch_txn_len > 0) {
 		ret = morse_dm_write(yaps->mors, yaps->aux_data->yds_addr,
-				     yaps->aux_data->to_chip_buffer, batch_txn_len);
+				     to_chip_buffer_aligned, batch_txn_len);
 		*num_pkts_sent += pkts_pending;
 	}
 
@@ -412,7 +424,9 @@ static int morse_yaps_hw_read_pkts(struct morse_yaps *yaps,
 {
 	int ret;
 	int i = 0;
-	char *read_ptr = yaps->aux_data->from_chip_buffer;
+	char *from_chip_buffer_aligned = PTR_ALIGN(yaps->aux_data->from_chip_buffer,
+						 yaps->mors->bus_ops->bulk_alignment);
+	char *read_ptr = from_chip_buffer_aligned;
 	int bytes_remaining = morse_calc_bytes_remaining(yaps);
 	bool again = false;
 
@@ -441,7 +455,7 @@ static int morse_yaps_hw_read_pkts(struct morse_yaps *yaps,
 
 	/* Read all available packets to the buffer */
 	ret = morse_dm_read(yaps->mors, yaps->aux_data->ysl_addr,
-			    yaps->aux_data->from_chip_buffer, bytes_remaining);
+			    from_chip_buffer_aligned, bytes_remaining);
 
 	if (ret)
 		goto exit;
@@ -499,7 +513,7 @@ static int morse_yaps_hw_read_pkts(struct morse_yaps *yaps,
 			/* TODO remove the warning, this is not a kernel bug */
 			MORSE_DBG_RATELIMITED(yaps->mors, "yaps split pkt\n");
 			memcpy(pkts[i].skb->data, read_ptr, bytes_remaining);
-			read_ptr = yaps->aux_data->from_chip_buffer;
+			read_ptr = from_chip_buffer_aligned;
 
 			ret = morse_dm_read(yaps->mors,
 					    /* Offset by 4 to avoid retry logic */
@@ -676,6 +690,7 @@ int morse_yaps_hw_init(struct morse *mors)
 	int flags;
 	struct morse_yaps *yaps = NULL;
 	int aux_data_len = sizeof(struct morse_yaps_hw_aux_data);
+	int alignment = mors->bus_ops->bulk_alignment;
 
 	morse_claim_bus(mors);
 
@@ -698,16 +713,23 @@ int morse_yaps_hw_init(struct morse *mors)
 		goto err_exit;
 	}
 
-	yaps->aux_data->to_chip_buffer = kzalloc(YAPS_HW_WINDOW_SIZE_BYTES, GFP_KERNEL);
+	yaps->aux_data->to_chip_buffer = kzalloc(YAPS_HW_WINDOW_SIZE_BYTES + alignment - 1,
+						 GFP_KERNEL);
 	if (!yaps->aux_data->to_chip_buffer) {
 		ret = -ENOMEM;
 		goto err_exit;
 	}
 
-	yaps->aux_data->from_chip_buffer = kzalloc(YAPS_HW_WINDOW_SIZE_BYTES, GFP_KERNEL);
+	yaps->aux_data->from_chip_buffer = kzalloc(YAPS_HW_WINDOW_SIZE_BYTES + alignment - 1,
+						   GFP_KERNEL);
 	if (!yaps->aux_data->from_chip_buffer) {
 		ret = -ENOMEM;
 		goto err_exit;
+	}
+
+	if (!IS_ALIGNED((uintptr_t)&yaps->aux_data->status_regs, alignment)) {
+		MORSE_YAPS_WARN(mors, "%s: Status registers are not aligned to %d bytes\n",
+				__func__, alignment);
 	}
 
 	yaps->ops = &morse_yaps_hw_ops;
@@ -739,15 +761,6 @@ err_exit:
 	morse_yaps_hw_finish(mors);
 	morse_release_bus(mors);
 	return ret;
-}
-
-void morse_yaps_hw_yaps_flush_tx_data(struct morse *mors)
-{
-	struct morse_yaps *yaps = mors->chip_if->yaps;
-
-	if ((yaps->flags & MORSE_CHIP_IF_FLAGS_DIR_TO_CHIP) &&
-	    (yaps->flags & (MORSE_CHIP_IF_FLAGS_DATA | MORSE_CHIP_IF_FLAGS_BEACON)))
-		morse_yaps_flush_tx_data(yaps);
 }
 
 void morse_yaps_hw_finish(struct morse *mors)

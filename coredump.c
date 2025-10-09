@@ -230,6 +230,59 @@ static void elf_copy_notes(struct morse *mors,
 	}
 }
 
+static void get_stop_info(struct morse *mors)
+{
+	const struct morse_coredump_mem_region *region;
+	const struct morse_coredump_data *crash = &mors->coredump.crash;
+
+	lockdep_assert_held(&mors->coredump.lock);
+	list_for_each_entry(region, &crash->memory.regions, list) {
+		struct stop_info {
+			__le32 hart;
+			__le32 line;
+			char info[];
+		} __packed * info;
+
+		if (region->type != MORSE_MEM_REGION_TYPE_ASSERT_INFO)
+			continue;
+
+		MORSE_COREDUMP_DBG(mors, "%s: looking in region 0x%08x:%d",
+			__func__, region->start, region->len);
+
+		if (region->len < (sizeof(*info) + 1)) {
+			MORSE_COREDUMP_WARN(mors, "%s: size of info region is unexpected",
+					    __func__);
+			continue;
+		}
+
+		info = kzalloc(ROUND_BYTES_TO_WORD(region->len + 1), GFP_KERNEL);
+		if (!info) {
+			MORSE_COREDUMP_ERR(mors, "%s: failed to allocate %d bytes",
+					   __func__, region->len);
+			continue;
+		}
+
+		if (read_memory_region(mors, region, info) == 0) {
+			uint hart = le32_to_cpu(info->hart);
+			uint line = le32_to_cpu(info->line);
+
+			if (strlen(info->info) > 0 || line > 0) {
+				mors->coredump.crash.information = kasprintf(GFP_KERNEL,
+									     "%s:%d (hart:%d)",
+									     info->info, line,
+									     hart);
+			}
+		}
+
+		kfree(info);
+		if (mors->coredump.crash.information) {
+			MORSE_COREDUMP_ERR(mors, "stop at %s\n",
+					   mors->coredump.crash.information);
+			break;
+		}
+	}
+}
+
 static void elf_copy_memory_regions(struct morse *mors,
 								struct elf32_hdr *ehdr,
 								struct elf32_phdr **phdr,
@@ -242,6 +295,9 @@ static void elf_copy_memory_regions(struct morse *mors,
 
 	list_for_each_entry(region, &crash->memory.regions, list) {
 		u8 *insert_at = (u8 *)ehdr + *offset;
+
+		if (region->type != MORSE_MEM_REGION_TYPE_GENERAL)
+			continue;
 
 		MORSE_COREDUMP_DBG(mors, "%s: copying region 0x%08x:%d",
 			__func__, region->start, region->len);
@@ -310,6 +366,8 @@ static void add_coredump_meta(const struct morse *mors, struct list_head *notes)
 	meta_append_str(notes, "morse.kernel-version", init_utsname()->release);
 	meta_append_str(notes, "morse.country", mors->country);
 	meta_append_bin(notes, "morse.mac-addr", mors->macaddr, ETH_ALEN);
+	if (mors->coredump.crash.information)
+		meta_append_str(notes, "morse.stop-info", mors->coredump.crash.information);
 }
 
 static int coredump_build(struct morse *mors, void **cd, size_t *cd_size)
@@ -326,6 +384,10 @@ static int coredump_build(struct morse *mors, void **cd, size_t *cd_size)
 
 	lockdep_assert_held(&mors->coredump.lock);
 
+	/* Claim/release bus for the entire bus access operation */
+	morse_claim_bus(mors);
+
+	get_stop_info(mors);
 	INIT_LIST_HEAD(&notes);
 	add_coredump_meta(mors, &notes);
 
@@ -349,9 +411,6 @@ static int coredump_build(struct morse *mors, void **cd, size_t *cd_size)
 	/* Calculate the start of the program headers, and the .data offset */
 	phdr = (struct elf32_phdr *)((u8 *)ehdr + ehdr->e_phoff);
 	offset = sizeof(*ehdr) + (sizeof(*phdr) * ehdr->e_phnum);
-
-	/* Claim/release bus for the entire bus access operation */
-	morse_claim_bus(mors);
 
 	/* Insert memory regions */
 	elf_copy_memory_regions(mors, ehdr, &phdr, &offset);
@@ -508,9 +567,6 @@ int morse_coredump_new(struct morse *mors, enum morse_coredump_reason reason)
 	if (!enable_coredump)
 		return -ENOTSUPP;
 
-	if (mors->bus_type == MORSE_HOST_BUS_TYPE_USB)
-		return -ENOTSUPP;
-
 	lockdep_assert_held(&mors->lock);
 
 	mutex_lock(&mors->coredump.lock);
@@ -587,9 +643,20 @@ void morse_coredump_set_fw_version_str(struct morse *mors, const char *str)
 	mutex_unlock(&mors->coredump.lock);
 }
 
+static void coredump_clear_stop_info(struct morse *mors)
+{
+	mutex_lock(&mors->coredump.lock);
+
+	kfree(mors->coredump.crash.information);
+	mors->coredump.crash.information = NULL;
+
+	mutex_unlock(&mors->coredump.lock);
+}
+
 void morse_coredump_destroy(struct morse *mors)
 {
 	morse_coredump_remove_memory_regions(mors);
 	morse_coredump_set_fw_binary_str(mors, NULL);
 	morse_coredump_set_fw_version_str(mors, NULL);
+	coredump_clear_stop_info(mors);
 }

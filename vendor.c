@@ -14,6 +14,9 @@
 #include "wiphy.h"
 #include "vendor.h"
 #include "mesh.h"
+#ifdef CONFIG_ANDROID
+#include "apf.h"
+#endif
 
 /** Extra overhead to account for any additional netlink framing */
 #define VENDOR_EVENT_OVERHEAD			(30)
@@ -33,8 +36,7 @@ morse_vendor_cmd_to_morse(struct wiphy *wiphy, struct wireless_dev *wdev,
 	int dataout_len;
 	struct morse_cmd_req_vendor *datain;
 	struct morse_cmd_resp_vendor *dataout;
-	struct ieee80211_vif *vif = NULL;
-	struct morse_vif *mors_vif;
+	struct morse_vif *mors_vif = NULL;
 
 	if (!data || data_len < sizeof(struct morse_cmd_req))
 		return -EINVAL;
@@ -45,13 +47,10 @@ morse_vendor_cmd_to_morse(struct wiphy *wiphy, struct wireless_dev *wdev,
 	memcpy(datain, data, data_len);
 
 	if (wdev) {
-		vif = wdev_to_ieee80211_vif(wdev);
-		if (vif) {
-			mors_vif = ieee80211_vif_to_morse_vif(vif);
-			/* Add the VIF ID to the command header */
-			if (mors_vif)
-				datain->hdr.vif_id = cpu_to_le16(mors_vif->id);
-		}
+		mors_vif = morse_wdev_to_morse_vif(wdev);
+		/* Add the VIF ID to the command header */
+		if (mors_vif)
+			datain->hdr.vif_id = cpu_to_le16(mors_vif->id);
 	}
 
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(*dataout));
@@ -65,9 +64,9 @@ morse_vendor_cmd_to_morse(struct wiphy *wiphy, struct wireless_dev *wdev,
 
 	mutex_lock(&mors->lock);
 	if (wdev)
-		morse_req_vendor(mors, vif, datain, data_len, dataout, &dataout_len);
+		morse_cmd_vendor(mors, mors_vif, datain, data_len, dataout, &dataout_len);
 	else
-		morse_wiphy_cmd_vendor(mors, datain, data_len, dataout, &dataout_len);
+		morse_hw_cmd_vendor(mors, datain, data_len, dataout, &dataout_len);
 	mutex_unlock(&mors->lock);
 	skb_len += dataout_len;
 	kfree(datain);
@@ -90,7 +89,7 @@ static const struct wiphy_vendor_command morse_vendor_commands[] = {
 	{
 	 .info = {
 		  .vendor_id = MORSE_OUI,
-		  .subcmd = MORSE_VENDOR_WIPHY_CMD_TO_MORSE,
+		  .subcmd = MORSE_VENDOR_HW_CMD_TO_MORSE,
 		  },
 	 .flags = 0,
 #if KERNEL_VERSION(5, 3, 0) <= MAC80211_VERSION_CODE
@@ -98,6 +97,55 @@ static const struct wiphy_vendor_command morse_vendor_commands[] = {
 #endif
 	 .doit = morse_vendor_cmd_to_morse,
 	},
+#ifdef CONFIG_ANDROID
+	{
+		.info = {
+			 .vendor_id = MORSE_OUI,
+			 .subcmd = MORSE_VENDOR_SUBCMD_GET_SUPPORTED_FEATURES,
+			 },
+		.flags = WIPHY_VENDOR_CMD_NEED_NETDEV,
+#if KERNEL_VERSION(5, 3, 0) <= MAC80211_VERSION_CODE
+		.policy = VENDOR_CMD_RAW_DATA,
+#endif
+		.doit = morse_vendor_cmd_get_supported_feature_set,
+	},
+	{
+		.info = {
+			 .vendor_id = MORSE_OUI,
+			 .subcmd = MORSE_VENDOR_SUBCMD_GET_PACKET_FILTER_CAPABILITIES,
+			 },
+		.flags = WIPHY_VENDOR_CMD_NEED_NETDEV,
+#if KERNEL_VERSION(5, 3, 0) <= MAC80211_VERSION_CODE
+		.policy = morse_apf_nla_policy,
+		.maxattr = VENDOR_ATTR_PACKET_FILTER_MAX,
+#endif
+		.doit = morse_vendor_cmd_apf_get_capabilities,
+	},
+	{
+		.info = {
+			 .vendor_id = MORSE_OUI,
+			 .subcmd = MORSE_VENDOR_SUBCMD_SET_PACKET_FILTER,
+			 },
+		.flags = WIPHY_VENDOR_CMD_NEED_NETDEV,
+#if KERNEL_VERSION(5, 3, 0) <= MAC80211_VERSION_CODE
+		.policy = morse_apf_nla_policy,
+		.maxattr = VENDOR_ATTR_PACKET_FILTER_MAX,
+#endif
+		.doit = morse_vendor_cmd_apf_set_packet_filter,
+	},
+	{
+		.info = {
+			 .vendor_id = MORSE_OUI,
+			 .subcmd = MORSE_VENDOR_SUBCMD_READ_PACKET_FILTER_DATA,
+			 },
+		.flags = WIPHY_VENDOR_CMD_NEED_NETDEV | WIPHY_VENDOR_CMD_NEED_RUNNING,
+#if KERNEL_VERSION(5, 3, 0) <= MAC80211_VERSION_CODE
+		.policy = morse_apf_nla_policy,
+		.maxattr = VENDOR_ATTR_PACKET_FILTER_MAX,
+#endif
+		.doit = morse_vendor_cmd_apf_read_packet_filter_data,
+	},
+#endif
 };
 
 static const struct nl80211_vendor_cmd_info morse_vendor_events[] = {
@@ -115,6 +163,9 @@ static const struct nl80211_vendor_cmd_info morse_vendor_events[] = {
 	[MORSE_VENDOR_EVENT_MESH_PEER_ADDR] = {
 					       .vendor_id = MORSE_OUI,
 					       .subcmd = MORSE_VENDOR_EVENT_MESH_PEER_ADDR },
+	[MORSE_VENDOR_EVENT_BSS_STATS] = {
+							.vendor_id = MORSE_OUI,
+							.subcmd = MORSE_VENDOR_EVENT_BSS_STATS },
 };
 
 void morse_set_vendor_commands_and_events(struct wiphy *wiphy)
@@ -252,22 +303,12 @@ void morse_vendor_insert_caps_ops_ie(struct morse *mors,
 	put_vendor_ie(&ie_data, ies_mask);
 }
 
-void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
-				 const struct ieee80211_mgmt *mgmt,
-				 struct dot11ah_ies_mask *ies_mask)
+struct dot11_morse_vendor_caps_ops_ie *
+morse_vendor_find_vendor_ie(struct dot11ah_ies_mask *ies_mask)
 {
-	struct ie_element *cur = &ies_mask->ies[WLAN_EID_VENDOR_SPECIFIC];
-	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
-	struct morse *mors = morse_vif_to_morse(mors_vif);
 	struct dot11_morse_vendor_caps_ops_ie *ie = NULL;
+	struct ie_element *cur = &ies_mask->ies[WLAN_EID_VENDOR_SPECIFIC];
 	bool found = false;
-	struct morse_sta *mors_sta = NULL;
-	struct ieee80211_sta *sta = NULL;
-	bool is_assoc_reassoc_req = (ieee80211_is_assoc_req(mgmt->frame_control) ||
-				     ieee80211_is_reassoc_req(mgmt->frame_control));
-	bool is_assoc_reassoc_resp = (ieee80211_is_assoc_resp(mgmt->frame_control) ||
-				      ieee80211_is_reassoc_resp(mgmt->frame_control));
-	bool is_mesh_open_frame = morse_dot11_is_mpm_open_frame(mgmt);
 
 	while (cur && cur->ptr) {
 		ie = (struct dot11_morse_vendor_caps_ops_ie *)cur->ptr;
@@ -279,7 +320,70 @@ void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
 		cur = cur->next;
 	}
 
-	if (!found)
+	if (found)
+		return ie;
+
+	return NULL;
+}
+
+void morse_vendor_fill_sta_vendor_info(struct morse_vif *mors_vif,
+				       struct dot11_morse_vendor_caps_ops_ie *ie)
+{
+	struct morse *mors = morse_vif_to_morse(mors_vif);
+
+	memset(&mors_vif->bss_vendor_info, 0, sizeof(mors_vif->bss_vendor_info));
+	mors_vif->bss_vendor_info.valid = true;
+	mors_vif->bss_vendor_info.chip_id = ie->hw_ver;
+	mors_vif->bss_vendor_info.sw_ver.major = ie->sw_ver.major;
+	mors_vif->bss_vendor_info.sw_ver.minor = ie->sw_ver.minor;
+	mors_vif->bss_vendor_info.sw_ver.patch = ie->sw_ver.patch;
+	mors_vif->bss_vendor_info.morse_mmss_offset =
+		MORSE_VENDOR_IE_CAP0_GET_MMSS_OFFSET(ie->cap0);
+	mors_vif->bss_vendor_info.rc_method = BMGET(ie->ops0,
+						    MORSE_VENDOR_IE_OPS0_RATE_CONTROL);
+
+	if (ie->ops0 & MORSE_VENDOR_IE_OPS0_DTIM_CTS_TO_SELF)
+		MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, DTIM_CTS_TO_SELF);
+
+	mors_vif->bss_vendor_info.supports_short_ack_timeout =
+	    (ie->cap0 & MORSE_VENDOR_IE_CAP0_SHORT_ACK_TIMEOUT);
+
+	mors_vif->bss_vendor_info.pv1_data_frame_only_support =
+		(ie->cap0 & MORSE_VENDOR_IE_CAP0_PV1_DATA_FRAME_SUPPORT);
+
+	/* Enable Page slicing capability if chip supports it */
+	if (mors_vif->page_slicing_info.enabled)
+		mors_vif->bss_vendor_info.page_slicing_exclusive_support =
+			(ie->cap0 & MORSE_VENDOR_IE_CAP0_PAGE_SLICING_EXCLUSIVE_SUPPORT);
+
+	if ((ie->ops0 & MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU) &&
+	    mors->custom_configs.enable_legacy_amsdu) {
+		/* AP agreed to our request for LEGACY AMSDU */
+		MORSE_OPS_SET(&mors_vif->operations, LEGACY_AMSDU);
+		MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, LEGACY_AMSDU);
+	} else {
+		MORSE_OPS_CLEAR(&mors_vif->operations, LEGACY_AMSDU);
+	}
+}
+
+void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
+				 const struct ieee80211_mgmt *mgmt,
+				 struct dot11ah_ies_mask *ies_mask)
+{
+	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
+	struct morse *mors = morse_vif_to_morse(mors_vif);
+	struct dot11_morse_vendor_caps_ops_ie *ie = NULL;
+	struct morse_sta *mors_sta = NULL;
+	struct ieee80211_sta *sta = NULL;
+	bool is_assoc_reassoc_req = (ieee80211_is_assoc_req(mgmt->frame_control) ||
+				     ieee80211_is_reassoc_req(mgmt->frame_control));
+	bool is_assoc_reassoc_resp = (ieee80211_is_assoc_resp(mgmt->frame_control) ||
+				      ieee80211_is_reassoc_resp(mgmt->frame_control));
+	bool is_mesh_open_frame = morse_dot11_is_mpm_open_frame(mgmt);
+
+	ie = morse_vendor_find_vendor_ie(ies_mask);
+
+	if (!ie)
 		return;
 
 	if (!is_morse_vendor_caps_ops_ie_allowed(vif, mgmt))
@@ -319,39 +423,7 @@ void morse_vendor_rx_caps_ops_ie(struct morse_vif *mors_vif,
 		}
 		rcu_read_unlock();
 	} else if (vif->type == NL80211_IFTYPE_STATION && is_assoc_reassoc_resp) {
-		memset(&mors_vif->bss_vendor_info, 0, sizeof(mors_vif->bss_vendor_info));
-		mors_vif->bss_vendor_info.valid = true;
-		mors_vif->bss_vendor_info.chip_id = ie->hw_ver;
-		mors_vif->bss_vendor_info.sw_ver.major = ie->sw_ver.major;
-		mors_vif->bss_vendor_info.sw_ver.minor = ie->sw_ver.minor;
-		mors_vif->bss_vendor_info.sw_ver.patch = ie->sw_ver.patch;
-		mors_vif->bss_vendor_info.morse_mmss_offset =
-			MORSE_VENDOR_IE_CAP0_GET_MMSS_OFFSET(ie->cap0);
-		mors_vif->bss_vendor_info.rc_method = BMGET(ie->ops0,
-							    MORSE_VENDOR_IE_OPS0_RATE_CONTROL);
-
-		if (ie->ops0 & MORSE_VENDOR_IE_OPS0_DTIM_CTS_TO_SELF)
-			MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, DTIM_CTS_TO_SELF);
-
-		mors_vif->bss_vendor_info.supports_short_ack_timeout =
-		    (ie->cap0 & MORSE_VENDOR_IE_CAP0_SHORT_ACK_TIMEOUT);
-
-		mors_vif->bss_vendor_info.pv1_data_frame_only_support =
-			(ie->cap0 & MORSE_VENDOR_IE_CAP0_PV1_DATA_FRAME_SUPPORT);
-
-		/* Enable Page slicing capability if chip supports it */
-		if (mors_vif->page_slicing_info.enabled)
-			mors_vif->bss_vendor_info.page_slicing_exclusive_support =
-				(ie->cap0 & MORSE_VENDOR_IE_CAP0_PAGE_SLICING_EXCLUSIVE_SUPPORT);
-
-		if ((ie->ops0 & MORSE_VENDOR_IE_OPS0_LEGACY_AMSDU) &&
-		    mors->custom_configs.enable_legacy_amsdu) {
-			/* AP agreed to our request for LEGACY AMSDU */
-			MORSE_OPS_SET(&mors_vif->operations, LEGACY_AMSDU);
-			MORSE_OPS_SET(&mors_vif->bss_vendor_info.operations, LEGACY_AMSDU);
-		} else {
-			MORSE_OPS_CLEAR(&mors_vif->operations, LEGACY_AMSDU);
-		}
+		morse_vendor_fill_sta_vendor_info(mors_vif, ie);
 	}
 }
 
@@ -385,10 +457,9 @@ int morse_vendor_get_ie_len_for_pkt(struct sk_buff *pkt, int oui_type)
 	return sizeof(struct dot11_morse_vendor_caps_ops_ie) + 2;
 }
 
-static int morse_vendor_send_bcn_vendor_ie_found_event(struct ieee80211_vif *vif,
+static int morse_vendor_send_bcn_vendor_ie_found_event(struct wireless_dev *wdev,
 						const struct ieee80211_vendor_ie *vie)
 {
-	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
 	struct sk_buff *skb;
 	int ret;
 
@@ -407,10 +478,9 @@ static int morse_vendor_send_bcn_vendor_ie_found_event(struct ieee80211_vif *vif
 	return 0;
 }
 
-int morse_vendor_send_mgmt_vendor_ie_found_event(struct ieee80211_vif *vif, u16 frame_type,
+int morse_vendor_send_mgmt_vendor_ie_found_event(struct wireless_dev *wdev, u16 frame_type,
 						 const struct ieee80211_vendor_ie *vie)
 {
-	struct wireless_dev *wdev = ieee80211_vif_to_wdev(vif);
 	struct sk_buff *skb;
 	int ret;
 
@@ -432,7 +502,7 @@ int morse_vendor_send_mgmt_vendor_ie_found_event(struct ieee80211_vif *vif, u16 
 
 	/* Also send legacy vendor IE event if a beacon */
 	if (frame_type == MORSE_VENDOR_IE_TYPE_BEACON)
-		ret = morse_vendor_send_bcn_vendor_ie_found_event(vif, vie);
+		ret = morse_vendor_send_bcn_vendor_ie_found_event(wdev, vie);
 
 	return ret;
 
@@ -528,4 +598,39 @@ exit:
 		  __func__, minimum_req_ack_timeout_us);
 
 	morse_cmd_ack_timeout_adjust(mors, mors_vif->id, minimum_req_ack_timeout_us);
+}
+
+int morse_vendor_send_bss_stats_event(struct ieee80211_vif *vif,
+			struct morse_evt_bss_stats *evt, size_t evt_data_len)
+{
+	struct wireless_dev *wdev;
+	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
+	struct morse *mors = morse_vif_to_morse(mors_vif);
+	struct sk_buff *skb;
+	int ret = 0;
+
+	if (!vif)
+		return -EIO;
+
+	wdev = ieee80211_vif_to_wdev(vif);
+
+	if (!wdev)
+		return -EIO;
+
+	skb = cfg80211_vendor_event_alloc(wdev->wiphy, NULL, evt_data_len,
+					MORSE_VENDOR_EVENT_BSS_STATS, GFP_KERNEL);
+	if (!skb)
+		return -ENOMEM;
+
+	ret = nla_put(skb, MORSE_VENDOR_ATTR_DATA, evt_data_len, evt);
+	if (ret < 0) {
+		MORSE_ERR(mors, "%s: Failed to prepare BSS stats event buffer. num_stas: %d err:%d",
+		  __func__, evt->num_stas, ret);
+		kfree_skb(skb);
+		return ret;
+	}
+	MORSE_DBG(mors, "%s: Success in sending BSS stats event. num_stas: %d active_stas:%d",
+		  __func__, evt->num_stas, evt->num_active_stas);
+	cfg80211_vendor_event(skb, GFP_KERNEL);
+	return ret;
 }

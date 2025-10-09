@@ -13,12 +13,29 @@
 #include "debug.h"
 #include "mmrc-submodule/src/core/mmrc.h"
 
-static void morse_print_station_stats(struct morse_sta *msta, struct seq_file *file)
+struct station_stats_iter {
+	const struct ieee80211_vif *on_vif;
+	struct seq_file *file;
+};
+
+static void morse_print_station_stats(void *data, struct ieee80211_sta *sta)
 {
+	struct station_stats_iter *iter_data = data;
+	struct seq_file *file = iter_data->file;
 	u32 last_tx_rate_kbps;
 	u32 last_rx_rate_kbps;
-	struct morse_skb_rx_status *status = &msta->last_rx.data_status;
+	struct morse_sta *msta = (struct morse_sta *)sta->drv_priv;
+	struct morse_skb_rx_status *status;
 
+	if (!msta) {
+		MORSE_WARN_ON(FEATURE_ID_DEFAULT, 1);
+		return;
+	}
+
+	if (msta->vif != iter_data->on_vif)
+		return;
+
+	status = &msta->last_rx.data_status;
 	if (!msta->last_rx.is_data_set) {
 		seq_printf(file, "Mesh Peer link %pM (rc unknown)\n", msta->addr);
 		return;
@@ -63,24 +80,16 @@ static int mesh_stats_read(struct seq_file *file, void *data)
 
 	for (vif_id = 0; vif_id < mors->max_vifs; vif_id++) {
 		struct ieee80211_vif *vif = morse_get_vif_from_vif_id(mors, vif_id);
-		struct list_head *morse_sta_list;
-		struct list_head *pos;
-		struct morse_vif *mors_vif;
+		struct station_stats_iter iter_data = {
+			.on_vif = vif,
+			.file = file,
+		};
 
 		if (!vif || vif->type != NL80211_IFTYPE_MESH_POINT)
 			continue;
 
-		mors_vif = ieee80211_vif_to_morse_vif(vif);
-		morse_sta_list = &mors_vif->ap->stas;
-
 		seq_printf(file, "%s: Peer Stats\n", morse_vif_name(vif));
-		rcu_read_lock();
-		list_for_each(pos, morse_sta_list) {
-			struct morse_sta *msta = list_entry(pos, struct morse_sta, list);
-
-			morse_print_station_stats(msta, file);
-		}
-		rcu_read_unlock();
+		ieee80211_iterate_stations_atomic(mors->hw, morse_print_station_stats, &iter_data);
 	}
 	return 0;
 }

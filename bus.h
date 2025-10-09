@@ -92,7 +92,7 @@ static inline void morse_bus_set_irq(struct morse *mors, bool enable)
 
 int morse_bus_test(struct morse *mors, const char *bus_name);
 void morse_bus_throughput_profiler(struct morse *mors);
-
+void morse_bus_interrupt_profiler_irq(struct morse *mors);
 int morse_skb_tx(struct morse *mors, struct sk_buff *skb, u8 channel);
 
 enum morse_host_bus_type {

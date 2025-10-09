@@ -82,6 +82,11 @@ struct morse_yaps {
 	} chip_queue_full;
 
 	u8 flags;
+
+	/**
+	 * @finish: Chip interface is stopping, new work should not be enqueued.
+	 */
+	bool finish;
 };
 
 struct morse_yaps_ops {
@@ -165,13 +170,6 @@ void morse_yaps_show(struct morse_yaps *yaps, struct seq_file *file);
  * @yaps: Pointer to yaps struct to delete.
  */
 void morse_yaps_finish(struct morse_yaps *yaps);
-
-/**
- * Flush data in tx queues
- *
- * @yaps: Pointer to yaps struct
- */
-void morse_yaps_flush_tx_data(struct morse_yaps *yaps);
 
 /**
  * Work function executed to perform yaps operations

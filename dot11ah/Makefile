@@ -8,7 +8,7 @@ DEBFLAGS = -O2
 endif
 
 # Set 0 to a version number. This is done to match the Linux expectations
-override MORSE_VERSION = "0-rel_1_15_3_2025_Apr_16"
+override MORSE_VERSION = "0-rel_1_16_4_2025_Sep_18"
 
 #ccflags-y += $(DEBFLAGS) -Werror
 ccflags-y += "-DMORSE_VERSION=$(MORSE_VERSION)"

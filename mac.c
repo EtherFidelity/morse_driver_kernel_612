@@ -119,14 +119,14 @@ enum morse_mac_mcs10_mode {
 
 /* Custom Module parameters */
 /* On chip hardware encryption can be disabled through modparam */
-static uint no_hwcrypt;
-module_param(no_hwcrypt, uint, 0644);
+static bool no_hwcrypt;
+module_param(no_hwcrypt, bool, 0644);
 MODULE_PARM_DESC(no_hwcrypt, "Disable on-chip hardware encryption");
 
 /* TX/RX MCS mask. Default 0x3FF limits max MCS to 9 for both Tx and Rx. */
 static uint mcs_mask __read_mostly = DEFAULT_MCS_RATE_MASK;
 module_param(mcs_mask, uint, 0644);
-MODULE_PARM_DESC(mcs_mask, "Supported MCS Mask, e.g. MCS0-2 use mask 0x07");
+MODULE_PARM_DESC(mcs_mask, "Supported MCS mask, e.g. MCS0-2 use mask 0x07");
 
 /**
  * Set the MCS10 configuration
@@ -136,7 +136,7 @@ MODULE_PARM_DESC(mcs_mask, "Supported MCS Mask, e.g. MCS0-2 use mask 0x07");
  */
 static enum morse_mac_mcs10_mode mcs10_mode __read_mostly = MCS10_MODE_DISABLED;
 module_param(mcs10_mode, uint, 0644);
-MODULE_PARM_DESC(mcs10_mode, "Set MCS10 mode");
+MODULE_PARM_DESC(mcs10_mode, "MCS10 mode");
 
 /* Enable/Disable channel survey */
 static bool enable_survey __read_mostly = ENABLE_SURVEY_DEFAULT;
@@ -147,7 +147,7 @@ MODULE_PARM_DESC(enable_survey, "Enable channel survey");
 static enum morse_mac_subbands_mode
 enable_subbands __read_mostly = SUBBANDS_MODE_ENABLED;
 module_param(enable_subbands, uint, 0644);
-MODULE_PARM_DESC(enable_subbands, "Enable Subband Transmission");
+MODULE_PARM_DESC(enable_subbands, "Enable subband transmission");
 
 /* Enable/Disable Powersave */
 static enum dot11ah_powersave_mode enable_ps __read_mostly = CONFIG_MORSE_POWERSAVE_MODE;
@@ -157,13 +157,13 @@ MODULE_PARM_DESC(enable_ps, "Enable PS");
 /* Enable/Disable Powersave */
 static bool enable_dynamic_ps_offload __read_mostly = true;
 module_param(enable_dynamic_ps_offload, bool, 0644);
-MODULE_PARM_DESC(enable_dynamic_ps_offload, "Enable dynamic PS fw offload");
+MODULE_PARM_DESC(enable_dynamic_ps_offload, "Enable dynamic PS firmware offload");
 
 /*
  * When set to a value greater than 0, Thin LMAC Mode is enabled.
  */
-static u32 thin_lmac __read_mostly;
-module_param(thin_lmac, uint, 0644);
+static bool thin_lmac __read_mostly;
+module_param(thin_lmac, bool, 0644);
 MODULE_PARM_DESC(thin_lmac, "Thin LMAC mode");
 
 /*
@@ -178,12 +178,12 @@ MODULE_PARM_DESC(virtual_sta_max, "Virtual STA test mode (max virtual STAs or 0 
 /* Enable/disable MBSSID IE addition in beacon/probe response */
 static bool enable_mbssid_ie __read_mostly;
 module_param(enable_mbssid_ie, bool, 0644);
-MODULE_PARM_DESC(enable_mbssid_ie, "Enable/Disable MBSSID IE support");
+MODULE_PARM_DESC(enable_mbssid_ie, "Enable MBSSID IE support in beacon and probe responses");
 
 /* Allow/Disallow rate control to use SGI */
 static bool enable_sgi_rc __read_mostly = true;
 module_param(enable_sgi_rc, bool, 0644);
-MODULE_PARM_DESC(enable_sgi_rc, "Allow/Disallow rate control to use SGI");
+MODULE_PARM_DESC(enable_sgi_rc, "Enable SGI use in rate control");
 
 /* Enable/Disable broadcasting travelling pilot support */
 static bool enable_trav_pilot __read_mostly = true;
@@ -195,10 +195,10 @@ static bool enable_rts_8mhz __read_mostly;
 module_param(enable_rts_8mhz, bool, 0644);
 MODULE_PARM_DESC(enable_rts_8mhz, "Enable RTS/CTS protection for 8MHz");
 
-/* Use CTS-to-self in place of RTS-CTS */
+/* Use CTS-to-self in place of RTS/CTS */
 static bool enable_cts_to_self __read_mostly;
 module_param(enable_cts_to_self, bool, 0644);
-MODULE_PARM_DESC(enable_cts_to_self, "Use CTS-to-self in place of RTS-CTS");
+MODULE_PARM_DESC(enable_cts_to_self, "Use CTS-to-self in place of RTS/CTS");
 
 /* Parse the regulatory domain, 2 char ISO-Alpha2 */
 static char country[MORSE_COUNTRY_LEN] = CONFIG_MORSE_COUNTRY;
@@ -212,9 +212,9 @@ module_param(enable_watchdog, bool, 0644);
 MODULE_PARM_DESC(enable_watchdog, "Enable watchdog");
 
 /* Set watchdog interval. User can update the watchdog interval in run time */
-static int watchdog_interval_secs __read_mostly = 30;
-module_param(watchdog_interval_secs, int, 0644);
-MODULE_PARM_DESC(watchdog_interval_secs, "Set watchdog interval in seconds");
+static uint watchdog_interval_secs __read_mostly = 30;
+module_param(watchdog_interval_secs, uint, 0644);
+MODULE_PARM_DESC(watchdog_interval_secs, "Watchdog interval in seconds");
 
 /* Enable/Disable watchdog reset */
 static bool enable_watchdog_reset __read_mostly;
@@ -222,13 +222,13 @@ module_param(enable_watchdog_reset, bool, 0644);
 MODULE_PARM_DESC(enable_watchdog_reset, "Enable driver reset from watchdog");
 
 /* Set limit on rate chain: could be 1, 2, 3 or 4 */
-static int max_rates __read_mostly = INIT_MAX_RATES_NUM;
-module_param(max_rates, int, 0644);
+static uint max_rates __read_mostly = INIT_MAX_RATES_NUM;
+module_param(max_rates, uint, 0644);
 MODULE_PARM_DESC(max_rates, "Maximum number of rates to try");
 
 /* Set maximum rate attempts, could be 1, 2, 3 or 4 */
-static int max_rate_tries __read_mostly = 1;
-module_param(max_rate_tries, int, 0644);
+static uint max_rate_tries __read_mostly = 1;
+module_param(max_rate_tries, uint, 0644);
 MODULE_PARM_DESC(max_rate_tries, "Maximum retries per rate");
 
 /* Set maximum aggregation count */
@@ -264,17 +264,18 @@ MODULE_PARM_DESC(tx_max_power_mbm, "Maximum transmitted power in mbm");
 /* Set maximum multicast frames after DTIM (0 - Do not limit) */
 static uint max_mc_frames __read_mostly = MORSE_MAX_MC_FRAMES_AFTER_DTIM;
 module_param(max_mc_frames, uint, 0644);
-MODULE_PARM_DESC(max_mc_frames, "Set maximum multicast frames after DTIM (0 for unlimited)");
+MODULE_PARM_DESC(max_mc_frames, "Maximum multicast frames after DTIM (0 for unlimited)");
 
-/* Enable CAC (Call Authentication Control) (AP mode only) */
-static uint enable_cac __read_mostly;
-module_param(enable_cac, uint, 0644);
-MODULE_PARM_DESC(enable_cac, "Enable Call Authentication Control (CAC)");
+/* Enable CAC (Centralized Authentication Control) (AP mode only) */
+static bool enable_cac __read_mostly;
+module_param(enable_cac, bool, 0644);
+MODULE_PARM_DESC(enable_cac, "Enable Centralized Authentication Control (CAC)");
 
 /* Enable Monitoring of Beacon Change Seq (STA mode only) */
-static uint enable_bcn_change_seq_monitor __read_mostly;
-module_param(enable_bcn_change_seq_monitor, uint, 0644);
-MODULE_PARM_DESC(enable_bcn_change_seq_monitor, "Enable Monitoring of Beacon Change Sequence");
+static bool enable_bcn_change_seq_monitor __read_mostly;
+module_param(enable_bcn_change_seq_monitor, bool, 0644);
+MODULE_PARM_DESC(enable_bcn_change_seq_monitor,
+	"Enable monitoring of Change Sequence field in S1G Beacon");
 
 /* Enable/Disable FW ARP response offloading */
 static bool enable_arp_offload __read_mostly = ENABLE_ARP_OFFLOAD_DEFAULT;
@@ -288,7 +289,7 @@ MODULE_PARM_DESC(enable_dhcpc_offload, "Enable DHCP client offload");
 /* Enable/Disable FW IBSS Probe Req Filtering */
 bool enable_ibss_probe_filtering __read_mostly = true;
 module_param(enable_ibss_probe_filtering, bool, 0644);
-MODULE_PARM_DESC(enable_ibss_probe_filtering, "Enable Probe Req Filtering in FW");
+MODULE_PARM_DESC(enable_ibss_probe_filtering, "Enable IBSS probe request filtering in firmware");
 
 char dhcpc_lease_update_script[DHCPC_LEASE_UPDATE_SCRIPT_NAME_SIZE_MAX] =
 	"/morse/scripts/dhcpc_update.sh";
@@ -332,19 +333,19 @@ module_param(enable_auto_mpsw, bool, 0644);
 MODULE_PARM_DESC(enable_auto_mpsw, "Enable automatic minimum packet spacing window setting");
 
 /* Enable/disable FullMAC mode */
-static uint enable_wiphy;
-module_param(enable_wiphy, uint, 0644);
+static bool enable_wiphy;
+module_param(enable_wiphy, bool, 0644);
 MODULE_PARM_DESC(enable_wiphy, "Enable FullMAC (Wiphy) interface");
 
 /* OCS type */
 uint ocs_type __read_mostly = MORSE_CMD_OCS_TYPE_RAW;
 module_param(ocs_type, uint, 0644);
-MODULE_PARM_DESC(ocs_type, "OCS Type (0: use qnull, 1: use RAW)");
+MODULE_PARM_DESC(ocs_type, "OCS Type (0: use QoS Null frames, 1: use RAW)");
 
 /* Enable/Disable multicast whitelisting */
 bool enable_mcast_whitelist __read_mostly = true;
 module_param(enable_mcast_whitelist, bool, 0644);
-MODULE_PARM_DESC(enable_mcast_whitelist, "Enable Multicast Whitelisting (0: disable, 1: enable)");
+MODULE_PARM_DESC(enable_mcast_whitelist, "Enable multicast whitelisting");
 
 /* Enable multicast rate control */
 static bool enable_mcast_rate_control __read_mostly;
@@ -360,7 +361,7 @@ MODULE_PARM_DESC(log_modparams_on_boot, "Log all module parameters during boot")
 /* Enable/Disable page slicing (dev only) */
 static bool enable_page_slicing __read_mostly;
 module_param(enable_page_slicing, bool, 0644);
-MODULE_PARM_DESC(enable_page_slicing, "Enable/Disable page slicing");
+MODULE_PARM_DESC(enable_page_slicing, "Enable page slicing");
 
 /* Enable/disable the PV1 frame support */
 static bool enable_pv1 __read_mostly;
@@ -369,7 +370,7 @@ MODULE_PARM_DESC(enable_pv1, "Enable PV1 frame support (dev only)");
 
 static bool enable_hw_scan __read_mostly = true;
 module_param(enable_hw_scan, bool, 0644);
-MODULE_PARM_DESC(enable_hw_scan, "Enable softmac HW scan support");
+MODULE_PARM_DESC(enable_hw_scan, "Enable SoftMAC hardware scan support");
 
 static bool enable_sched_scan __read_mostly = true;
 module_param(enable_sched_scan, bool, 0644);
@@ -502,7 +503,7 @@ struct ieee80211_supported_band mors_band_5ghz = {
 
 bool is_fullmac_mode(void)
 {
-	return (enable_wiphy > 0);
+	return enable_wiphy;
 }
 
 /* Returns true if only STA mode is supported */
@@ -526,7 +527,7 @@ bool is_virtual_sta_test_mode(void)
 
 bool is_sw_crypto_mode(void)
 {
-	return (no_hwcrypt > 0);
+	return no_hwcrypt;
 }
 
 bool morse_mac_ps_enabled(struct morse *mors)
@@ -829,12 +830,12 @@ bool morse_mac_is_subband_enable(void)
 	return (enable_subbands == SUBBANDS_MODE_ENABLED);
 }
 
-int morse_mac_get_max_rate_tries(void)
+uint morse_mac_get_max_rate_tries(void)
 {
 	return max_rate_tries;
 }
 
-int morse_mac_get_max_rate(void)
+uint morse_mac_get_max_rate(void)
 {
 	return max_rates;
 }
@@ -878,12 +879,11 @@ void morse_mac_fill_tx_info(struct morse *mors,
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
 	struct morse_sta *mors_sta = NULL;
-	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
+	__le16 fc = ((struct ieee80211_hdr *)skb->data)->frame_control;
 	int op_bw_mhz = mors->custom_configs.channel_info.op_bw_mhz;
 	int i;
 	u8 ampdu_mmss = 0;
 	u8 morse_mmss_offset = 0;
-	u8 tid = skb->priority & IEEE80211_QOS_CTL_TAG1D_MASK;
 	bool rts_allowed = op_bw_mhz < 8 || enable_rts_8mhz;	/* Disable 8MHz RTS/CTS for now */
 
 	if (sta)
@@ -924,8 +924,7 @@ void morse_mac_fill_tx_info(struct morse *mors,
 
 	/* Disable probe retries in constrained environments */
 	if (mors->duty_cycle > 0 && mors->duty_cycle <= duty_cycle_probe_retry_threshold) {
-		if (ieee80211_is_probe_req(hdr->frame_control) ||
-		    ieee80211_is_probe_resp(hdr->frame_control)) {
+		if (ieee80211_is_probe_req(fc) || ieee80211_is_probe_resp(fc)) {
 			mors->debug.page_stats.tx_duty_cycle_retry_disabled++;
 			tx_info->rates[0].count = 1;
 			tx_info->rates[1].count = 0;
@@ -949,10 +948,9 @@ void morse_mac_fill_tx_info(struct morse *mors,
 		if (info->flags & IEEE80211_TX_STATUS_EOSP)
 			tx_info->flags |= cpu_to_le32(MORSE_TX_CONF_FLAGS_IMMEDIATE_REPORT);
 #if KERNEL_VERSION(6, 6, 0) > LINUX_VERSION_CODE
-	} else if (ieee80211_is_mgmt(hdr->frame_control) &&
-		   !ieee80211_is_bufferable_mmpdu(hdr->frame_control)) {
+	} else if (ieee80211_is_mgmt(fc) && !ieee80211_is_bufferable_mmpdu(fc)) {
 #else
-	} else if (ieee80211_is_mgmt(hdr->frame_control) && !ieee80211_is_bufferable_mmpdu(skb)) {
+	} else if (ieee80211_is_mgmt(fc) && !ieee80211_is_bufferable_mmpdu(skb)) {
 #endif
 		/*
 		 * Note, this does not handle the special IBSS case where probe responses
@@ -970,9 +968,16 @@ void morse_mac_fill_tx_info(struct morse *mors,
 		    cpu_to_le32(MORSE_TX_CONF_FLAGS_KEY_IDX_SET(info->control.hw_key->hw_key_idx));
 	}
 
-	tx_info->tid = tid;
+	tx_info->tid = skb->priority & IEEE80211_QOS_CTL_TID_MASK;
+	if (ieee80211_is_data_qos(fc)) {
+		u8 frame_tid = MORSE_IEEE80211_GET_TID((struct ieee80211_hdr *)skb->data);
+
+		MORSE_WARN_ON_ONCE(FEATURE_ID_DEFAULT, tx_info->tid != frame_tid);
+		tx_info->tid = frame_tid;
+	}
+
 	if (mors_sta) {
-		tx_info->tid_params = mors_sta->tid_params[tid];
+		tx_info->tid_params = mors_sta->tid_params[tx_info->tid];
 
 		if (info->flags & IEEE80211_TX_CTL_CLEAR_PS_FILT) {
 			if (mors_sta->tx_ps_filter_en)
@@ -1560,11 +1565,11 @@ static int morse_mac_process_s1g_caps(struct morse *mors,
 		    (sta_max_bw == S1G_CAP0_SUPP_8MHZ) ? 8 :
 		    (sta_max_bw == S1G_CAP0_SUPP_4MHZ) ? 4 : 2;
 
-		if (mors_sta->state >= IEEE80211_STA_ASSOC)
-			mors_sta->already_assoc_req = true;
-
 		mors_sta->ampdu_mmss = S1G_CAP3_GET_MIN_AMPDU_START_SPC(s1g_cap3);
 	}
+
+	if (is_assoc_req)
+		mors_sta->assoc_req_count++;
 
 	/* Store 1st byte of S1G Caps to retrieve SGI and support channel width info later */
 	mors_sta->s1g_cap0 = ies_mask->ies[WLAN_EID_S1G_CAPABILITIES].ptr[0];
@@ -2046,12 +2051,7 @@ morse_aggr_check(struct morse_vif *mors_vif, struct ieee80211_sta *pubsta, struc
 {
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 	struct morse_sta *mors_sta = (struct morse_sta *)pubsta->drv_priv;
-#if KERNEL_VERSION(4, 17, 0) > MAC80211_VERSION_CODE
-	u8 *qos_ctrl = ieee80211_get_qos_ctl(hdr);
-	u16 tid =  qos_ctrl[0] & IEEE80211_QOS_CTL_TID_MASK;
-#else
-	u16 tid = ieee80211_get_tid(hdr);
-#endif
+	u8 tid = MORSE_IEEE80211_GET_TID(hdr);
 
 	/* we are already aggregating */
 	if (mors_sta->tid_tx[tid] || mors_sta->tid_start_tx[tid])
@@ -2419,6 +2419,31 @@ exit:
 	return ret;
 }
 
+int morse_cqm_rssi_notify_event(struct morse *mors, struct ieee80211_vif *vif,
+		struct morse_cmd_evt_cqm_rssi_notify *cqm_notify)
+{
+	s16 rssi = le16_to_cpu(cqm_notify->rssi);
+	u16 event = le16_to_cpu(cqm_notify->event);
+
+	if (!vif)
+		return -ENODEV;
+
+	if (!(vif->driver_flags & IEEE80211_VIF_SUPPORTS_CQM_RSSI))
+		return -EPERM;
+
+	MORSE_DBG(mors, "%s: event:%d, rssi:%d dBm\n", __func__,
+					cqm_notify->event, cqm_notify->rssi);
+	if (event == MORSE_CMD_CQM_RSSI_THRESHOLD_EVENT_LOW) {
+		morse_mac_cqm_rssi_notify(vif, NL80211_CQM_RSSI_THRESHOLD_EVENT_LOW,
+					rssi, GFP_KERNEL);
+	} else if (event == MORSE_CMD_CQM_RSSI_THRESHOLD_EVENT_HIGH) {
+		morse_mac_cqm_rssi_notify(vif, NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH,
+					rssi, GFP_KERNEL);
+	}
+
+	return 0;
+}
+
 static int morse_mac_driver_restart(struct morse *mors)
 {
 	schedule_work(&mors->driver_restart);
@@ -2437,6 +2462,7 @@ static int morse_mac_driver_restart(struct morse *mors)
  */
 static void ignore_s1g_channel(struct ieee80211_hw *hw, u32 freq_khz, u32 bw_mhz)
 {
+	int ret;
 	struct ieee80211_channel *ch;
 	struct morse *mors = hw->priv;
 	int op_freq_5g;
@@ -2452,8 +2478,15 @@ static void ignore_s1g_channel(struct ieee80211_hw *hw, u32 freq_khz, u32 bw_mhz
 	op_freq_5g = ieee80211_channel_to_frequency(op_chan_5g, NL80211_BAND_5GHZ);
 	ch = ieee80211_get_channel(hw->wiphy, op_freq_5g);
 	if (!ch) {
-		MORSE_WARN(mors, "%s: Channel %dkHz %dMHz %d/%d (S1G/5G) not found", __func__,
-			   freq_khz, bw_mhz, op_chan_s1g, op_chan_5g);
+		MORSE_WARN(mors, "%s: Channel %dkHz %dMHz %d/%d (S1G/5G) not found in 5GHz band",
+			  __func__, freq_khz, bw_mhz, op_chan_s1g, op_chan_5g);
+		return;
+	}
+
+	ret = morse_dot11ah_ignore_channel(op_chan_s1g);
+	if (ret) {
+		MORSE_WARN(mors, "%s: Channel %dkHz %dMHz %d/%d (S1G/5G) not found in S1G band",
+			   __func__, freq_khz, bw_mhz, op_chan_s1g, op_chan_5g);
 		return;
 	}
 
@@ -2539,7 +2572,6 @@ static int morse_mac_ops_start(struct ieee80211_hw *hw)
 
 	/* Read and print FW version */
 	morse_cmd_get_version(mors);
-	mors->mon_if.id = 0XFFFF;
 	mors->started = true;
 
 	/* Retrieve channels from the HW that are unusable */
@@ -2565,9 +2597,9 @@ static void morse_mac_ops_stop(struct ieee80211_hw *hw, bool suspend)
 
 	mutex_lock(&mors->lock);
 	/* Make sure we stop any monitor interfaces */
-	if (mon_if->id != 0xFFFF) {
+	if (mon_if->id != INVALID_VIF_ID) {
 		morse_cmd_rm_if(mors, mon_if->id);
-		mon_if->id = 0xFFFF;
+		mon_if->id = INVALID_VIF_ID;
 		MORSE_INFO(mors, "monitor interfaced removed\n");
 	}
 	mors->started = false;
@@ -2610,7 +2642,7 @@ morse_mac_save_sta_backup(struct morse *mors, struct morse_vif *mors_vif,
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(mors_vif->sta_backups); i++) {
-		if (!mors_vif->sta_backups[i].already_assoc_req ||
+		if (mors_vif->sta_backups[i].assoc_req_count == 0 ||
 		    time_after(jiffies, mors_vif->sta_backups[i].timeout)) {
 			MORSE_DBG(mors, "Storing STA backup (slot %d) for %pM\n",
 				  i, mors_sta->addr);
@@ -2630,7 +2662,7 @@ morse_mac_restore_sta_backup(struct morse *mors, struct morse_vif *mors_vif,
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(mors_vif->sta_backups); i++) {
-		if (mors_vif->sta_backups[i].already_assoc_req &&
+		if (mors_vif->sta_backups[i].assoc_req_count > 0 &&
 		    ether_addr_equal_unaligned(mors_vif->sta_backups[i].addr, addr)) {
 			MORSE_INFO(mors, "Retrieving STA backup (slot %d) for %pM\n",
 				   i, mors_sta->addr);
@@ -2909,7 +2941,7 @@ static int morse_mac_ops_add_interface(struct ieee80211_hw *hw, struct ieee80211
 		ret = EOPNOTSUPP;
 		goto exit;
 	}
-	vif->driver_flags |= IEEE80211_VIF_BEACON_FILTER;
+	vif->driver_flags |= IEEE80211_VIF_BEACON_FILTER | IEEE80211_VIF_SUPPORTS_CQM_RSSI;
 
 	morse_vif_add(mors, mors_vif->id, vif);
 
@@ -2956,7 +2988,6 @@ static int morse_mac_ops_add_interface(struct ieee80211_hw *hw, struct ieee80211
 		if (ret)
 			goto exit;
 
-		INIT_LIST_HEAD(&mors_vif->ap->stas);
 		mors_vif->ap->mors_vif = mors_vif;
 
 		if (ieee80211_vif_is_mesh(vif)) {
@@ -3011,15 +3042,15 @@ static int morse_mac_ops_add_interface(struct ieee80211_hw *hw, struct ieee80211
 
 		ret = morse_raw_init(mors_vif, enable_raw && (!enable_wiphy));
 		MORSE_WARN_ON(FEATURE_ID_DEFAULT, ret);
+
+		ret = morse_bss_stats_init(mors_vif);
+		MORSE_WARN_ON(FEATURE_ID_DEFAULT, ret);
 		break;
 	case NL80211_IFTYPE_STATION:
 		is_sta = true;
 
 		if (enable_dynamic_ps_offload)
 			vif->driver_flags |= IEEE80211_VIF_SUPPORTS_UAPSD;
-
-		if (is_fullmac_mode())
-			vif->driver_flags &= ~IEEE80211_VIF_SUPPORTS_UAPSD;
 
 		morse_send_probe_req_init(vif);
 
@@ -3030,6 +3061,9 @@ static int morse_mac_ops_add_interface(struct ieee80211_hw *hw, struct ieee80211
 		break;
 	}
 
+#ifdef CONFIG_ANDROID
+	mors_vif->apf.enabled = false;
+#endif
 	morse_twt_init_vif(mors, mors_vif, enable_twt, is_ap, is_sta,
 		(enable_ps == POWERSAVE_MODE_FULLY_ENABLED),
 		enable_dynamic_ps_offload,
@@ -3118,8 +3152,10 @@ static void morse_mac_ops_remove_interface(struct ieee80211_hw *hw, struct ieee8
 		if (ieee80211_vif_is_mesh(vif))
 			morse_mesh_deinit(mors_vif);
 
-		if (vif->type == NL80211_IFTYPE_AP)
+		if (vif->type == NL80211_IFTYPE_AP) {
+			morse_bss_stats_deinit(mors_vif);
 			morse_raw_finish(mors_vif);
+		}
 
 		morse_pre_assoc_peer_list_vif_release(mors);
 		kfree(mors_vif->ap);
@@ -3147,6 +3183,11 @@ static void morse_mac_ops_remove_interface(struct ieee80211_hw *hw, struct ieee8
 		morse_pv1_finish_vif(mors_vif);
 
 	morse_vendor_ie_deinit_interface(mors_vif);
+
+#ifdef CONFIG_ANDROID
+	mors_vif->apf.enabled = false;
+	MORSE_DBG(mors, "%s: Disabled APF\n", __func__);
+#endif
 
 	ret = morse_cmd_rm_if(mors, mors_vif->id);
 	if (ret) {
@@ -3383,16 +3424,16 @@ static int morse_mac_change_channel(struct ieee80211_hw *hw)
 	if (!ret) {
 		struct morse_channel_info *stored_info = &mors->custom_configs.channel_info;
 
-		if (freq_hz != DEFAULT_FREQUENCY)
+		if (freq_hz != MORSE_CMD_CHANNEL_FREQ_NOT_SET)
 			stored_info->op_chan_freq_hz = freq_hz;
 
-		if (pri_1mhz_chan_idx != DEFAULT_1MHZ_PRIMARY_CHANNEL_INDEX)
+		if (pri_1mhz_chan_idx != MORSE_CMD_CHANNEL_IDX_NOT_SET)
 			stored_info->pri_1mhz_chan_idx = pri_1mhz_chan_idx;
 
-		if (op_bw_mhz != DEFAULT_BANDWIDTH)
+		if (op_bw_mhz != MORSE_CMD_CHANNEL_BW_NOT_SET)
 			stored_info->op_bw_mhz = op_bw_mhz;
 
-		if (pri_bw_mhz != DEFAULT_BANDWIDTH)
+		if (pri_bw_mhz != MORSE_CMD_CHANNEL_BW_NOT_SET)
 			stored_info->pri_bw_mhz = pri_bw_mhz;
 
 		/* Validate that primary does not exceed operating */
@@ -3456,12 +3497,14 @@ static int morse_mac_ops_config(struct ieee80211_hw *hw, u32 changed)
 				MORSE_ERR(mors, "monitor interface add failed %d\n", ret);
 			else
 				MORSE_INFO(mors, "monitor interfaced added %d\n", mon_if->id);
+			mors->monitor_mode = true;
 		} else {
-			if (mon_if->id != 0xFFFF) {
+			if (mon_if->id != INVALID_VIF_ID) {
 				morse_cmd_rm_if(mors, mon_if->id);
 				MORSE_INFO(mors, "monitor interfaced removed\n");
 			}
-			mon_if->id = 0xFFFF;
+			mon_if->id = INVALID_VIF_ID;
+			mors->monitor_mode = false;
 		}
 	}
 
@@ -3594,7 +3637,7 @@ morse_mac_ops_bss_info_changed(struct ieee80211_hw *hw,
 		/* Handle only stop mesh. Start mesh will be handled, when supplicant
 		 * configures mesh id and other params.
 		 */
-		if (ieee80211_vif_is_mesh(vif) && !bss_conf->enable_beacon) {
+		if (ieee80211_vif_is_mesh(vif) && !vif->bss_conf.enable_beacon) {
 			int ret = morse_cmd_cfg_mesh_bss(mors_vif, true);
 
 			mors_vif->mesh->is_mesh_active = false;
@@ -3697,6 +3740,11 @@ morse_mac_ops_bss_info_changed(struct ieee80211_hw *hw,
 						      vif->cfg.arp_addr_cnt,
 						      vif->cfg.arp_addr_list);
 #endif
+
+	if ((changed & BSS_CHANGED_CQM) && vif->type == NL80211_IFTYPE_STATION) {
+		morse_cmd_set_cqm_rssi(mors, mors_vif->id,
+				info->cqm_rssi_thold, info->cqm_rssi_hyst);
+	}
 
 	mutex_unlock(&mors->lock);
 }
@@ -4329,11 +4377,15 @@ morse_mac_ops_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	mutex_lock(&mors->lock);
 
 	if ((old_state > IEEE80211_STA_NONE &&
-	     new_state <= IEEE80211_STA_NONE) && mors_sta->already_assoc_req) {
+	     new_state <= IEEE80211_STA_NONE) &&
+	    mors_sta->assoc_req_count > 1) {
 		mors_sta->tx_ps_filter_en = false;
 		morse_mac_save_sta_backup(mors, mors_vif, mors_sta);
 		morse_vendor_reset_sta_transient_info(vif, mors_sta);
 	}
+
+	if (new_state > IEEE80211_STA_ASSOC)
+		mors_sta->assoc_req_count = 0;
 
 	/* Always use WME (or QoS) for 802.11ah */
 	rcu_read_lock();
@@ -4374,7 +4426,6 @@ morse_mac_ops_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 			mors_sta->tid_start_tx[i] = false;
 			mors_sta->tid_tx[i] = false;
 		}
-
 		/* Fetch beacon/probe resp using bssid for S1G caps and update the
 		 * STA subbands (HT/VHT) Capabilities
 		 */
@@ -4409,12 +4460,15 @@ morse_mac_ops_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	ether_addr_copy(mors_sta->addr, sta->addr);
 	mors_sta->state = new_state;
+	mors_sta->vif = vif;
 
 	/* As per the mac80211 documentation, this callback must not fail
 	 * for down transitions of state.
 	 */
 	if (new_state < old_state)
 		ret = 0;
+
+	morse_bss_stats_update_sta_state(mors, vif, sta, old_state, new_state);
 
 	if (new_state > old_state && new_state == IEEE80211_STA_ASSOC) {
 		MORSE_INFO(mors, "Station associated %pM, aid=%d\n", sta->addr, sta->aid);
@@ -4425,7 +4479,6 @@ morse_mac_ops_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 					   aid);
 			} else {
 				mors_vif->ap->num_stas++;
-				list_add(&mors_sta->list, &mors_vif->ap->stas);
 				morse_pre_assoc_peer_delete(mors, sta->addr);
 			}
 
@@ -4462,7 +4515,6 @@ morse_mac_ops_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		if (vif->type == NL80211_IFTYPE_AP || vif->type == NL80211_IFTYPE_MESH_POINT) {
 			if (test_and_clear_bit(aid, mors_vif->ap->aid_bitmap)) {
 				mors_vif->ap->num_stas--;
-				list_del_init(&mors_sta->list);
 			} else {
 				MORSE_WARN(mors,
 					   "Non-existent station disassociated with AID %d\n",
@@ -4523,7 +4575,7 @@ morse_mac_ops_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		 * this case we don't purge events from the queue.
 		 */
 		if (new_state < old_state &&
-		    new_state == IEEE80211_STA_NONE && !mors_sta->already_assoc_req)
+		    new_state == IEEE80211_STA_NONE && mors_sta->assoc_req_count <= 1)
 			morse_twt_event_queue_purge(mors, mors_vif, sta->addr);
 
 		/* If a STA is added or removed from the AP, update the RAW assignments. */
@@ -5037,6 +5089,12 @@ static struct ieee80211_ops mors_ops = {
 	.sta_statistics = morse_sta_tx_rate_stats,
 	.get_expected_throughput = morse_get_expected_throughput,
 #endif
+#if KERNEL_VERSION(6, 9, 0) <= MAC80211_VERSION_CODE
+	.add_chanctx = ieee80211_emulate_add_chanctx,
+	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+	.change_chanctx = ieee80211_emulate_change_chanctx,
+	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
+#endif
 
 };
 
@@ -5138,6 +5196,33 @@ void morse_mac_send_buffered_bc(struct ieee80211_vif *vif)
 	}
 }
 
+/**
+ * morse_mac_rx_center_freq_s1g_to_5g - Convert an Rx S1G channel center frequency to its
+ * 5G equivalent
+ *
+ * @mors: Morse structure
+ * @rx_s1g_freq_khz: Received frame center frequency in kHz
+ * @rx_bw_mhz: S1G BW of the received frame in MHz
+ *
+ * Return: 5G equivalent channel center frequency of received frame in MHz
+ */
+static int morse_mac_rx_center_freq_s1g_to_5g(struct morse *mors, u32 rx_s1g_freq_khz,
+	u8 rx_bw_mhz)
+{
+	int rx_freq;
+	u32 s1g_chan;
+	int chan_5g;
+
+	s1g_chan = morse_dot11ah_freq_khz_bw_mhz_to_chan(rx_s1g_freq_khz, rx_bw_mhz);
+	chan_5g = morse_dot11ah_s1g_chan_to_5g_chan(s1g_chan);
+	rx_freq = ieee80211_channel_to_frequency(chan_5g, NL80211_BAND_5GHZ);
+
+	if (rx_freq == 0)
+		MORSE_WARN_RATELIMITED(mors, "Unable to determine 5G frequency of RX frame\n");
+
+	return rx_freq;
+}
+
 void
 morse_mac_rx_status(struct morse *mors,
 		    const struct morse_skb_rx_status *hdr_rx_status,
@@ -5147,10 +5232,9 @@ morse_mac_rx_status(struct morse *mors,
 	__le16 fc = ((struct ieee80211_hdr *)skb->data)->frame_control;
 	u8 mcs_index;
 	u8 nss_index;
-#if KERNEL_VERSION(4, 12, 0) <= MAC80211_VERSION_CODE
 	enum dot11_bandwidth bw_idx;
 	u32 bw_mhz;
-#else
+#if KERNEL_VERSION(4, 12, 0) > MAC80211_VERSION_CODE
 	enum nl80211_chan_width chan_width = mors->hw->conf.chandef.width;
 #endif
 	u32 flags = le32_to_cpu(hdr_rx_status->flags);
@@ -5162,6 +5246,7 @@ morse_mac_rx_status(struct morse *mors,
 		const struct ieee80211_hdr *hdr = (const struct ieee80211_hdr *)skb->data;
 		const u8 *sta_lookup_addr = (ieee80211_is_s1g_beacon(fc)) ?
 			hdr->addr1 : hdr->addr2;
+		bool is_null_data = (ieee80211_is_qos_nullfunc(fc) || ieee80211_is_nullfunc(fc));
 
 		/* Must be held while finding and dereferencing sta */
 		rcu_read_lock();
@@ -5171,12 +5256,15 @@ morse_mac_rx_status(struct morse *mors,
 			struct morse_skb_rx_status *status = ieee80211_is_mgmt(fc) ?
 				&msta->last_rx.mgmt_status : &msta->last_rx.data_status;
 
-			if (ieee80211_is_mgmt(fc))
+			if (ieee80211_is_mgmt(fc)) {
 				msta->last_rx.is_mgmt_set = true;
-			else
+				memcpy(status, hdr_rx_status, sizeof(*status));
+			} else if (!is_null_data) {
 				msta->last_rx.is_data_set = true;
+				morse_bss_stats_update_rx(vif, skb, sta, status);
+				memcpy(status, hdr_rx_status, sizeof(*status));
+			}
 
-			memcpy(status, hdr_rx_status, sizeof(*status));
 			msta->avg_rssi = msta->avg_rssi ?
 			    CALC_AVG_RSSI(msta->avg_rssi, rx_status->signal) : rx_status->signal;
 		}
@@ -5201,8 +5289,13 @@ morse_mac_rx_status(struct morse *mors,
 		rx_status->flag |= RX_FLAG_DECRYPTED;
 
 	rx_status->band = NL80211_BAND_5GHZ;
-	rx_status->freq = ieee80211_channel_to_frequency(mors->channel_num_80211n,
-							 rx_status->band);
+	/* Calculate bandwidth of rx status object in MHz */
+	bw_idx = morse_ratecode_bw_index_get(hdr_rx_status->morse_ratecode);
+	bw_mhz = morse_ratecode_bw_index_to_s1g_bw_mhz(bw_idx);
+
+	rx_status->freq = morse_mac_rx_center_freq_s1g_to_5g(mors,
+					KHZ100_TO_KHZ(le16_to_cpu(hdr_rx_status->freq_100khz)),
+					bw_mhz);
 
 	nss_index = morse_ratecode_nss_index_get(hdr_rx_status->morse_ratecode);
 #if KERNEL_VERSION(4, 12, 0) <= MAC80211_VERSION_CODE
@@ -5703,6 +5796,22 @@ static int morse_rx_mgmt_ccmp_replay_check(struct ieee80211_sta *sta, const stru
 	return false; /* No replay detected */
 }
 
+int morse_mac_get_tx_attempts(struct morse *mors, struct morse_skb_tx_status *tx_sts)
+{
+	int attempts = 0;
+	int i;
+	int count = min_t(int, MORSE_SKB_MAX_RATES, IEEE80211_TX_MAX_RATES);
+
+	for (i = 0; i < count; i++) {
+		if (tx_sts->rates[i].count > 0)
+			attempts += tx_sts->rates[i].count;
+		else
+			break;
+	}
+
+	return attempts;
+}
+
 static int morse_mac_process_s1g_mgmt(struct morse *mors, struct ieee80211_vif *vif,
 				      const struct sk_buff *skb,
 				      struct dot11ah_ies_mask *ies_mask)
@@ -5711,25 +5820,26 @@ static int morse_mac_process_s1g_mgmt(struct morse *mors, struct ieee80211_vif *
 	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
 	struct ieee80211_sta *sta;
 	__le16 fc = hdr->frame_control;
+	bool is_assoc_req = (ieee80211_is_assoc_req(fc) || ieee80211_is_reassoc_req(fc));
 	int ret = 0;
 
+	/* Must be held while finding and dereferencing sta */
+	rcu_read_lock();
+	sta = ieee80211_find_sta_by_ifaddr(mors->hw, hdr->sa, vif->addr);
 	/* PN replay check only for protected action frames */
-	if (ieee80211_is_action(fc) && ieee80211_has_protected(fc)) {
-		/* Must be held while finding and dereferencing sta */
-		rcu_read_lock();
-		sta = ieee80211_find_sta_by_ifaddr(mors->hw, hdr->sa, vif->addr);
-		if (!sta) {
-			rcu_read_unlock();
-			goto exit;
-		}
+	if (sta && ieee80211_is_action(fc) && ieee80211_has_protected(fc)) {
 		if (sta->mfp && morse_rx_mgmt_ccmp_replay_check(sta, skb)) {
 			rcu_read_unlock();
 			MORSE_ERR(mors, "%s Mgmt replay detected, dropping\n", __func__);
 			ret = -EINVAL;
 			goto exit;
 		}
-		rcu_read_unlock();
 	}
+	/* Process Assoc Req in RAW module */
+	if (vif->type == NL80211_IFTYPE_AP && is_assoc_req && sta)
+		ret = morse_raw_process_rx_mgmt(mors, vif, sta, skb, ies_mask);
+	rcu_read_unlock();
+
 	morse_vendor_rx_caps_ops_ie(mors_vif, hdr, ies_mask);
 
 	if (mors_vif->cac.enabled && vif->type == NL80211_IFTYPE_AP && ieee80211_is_auth(fc))
@@ -5876,10 +5986,8 @@ void morse_mac_skb_recv(struct morse *mors,
 	if (!skb->data || skb->len == 0)
 		goto exit;
 
-	vif = morse_get_vif_from_rx_status(mors, hdr_rx_status);
-
 #ifdef CONFIG_MORSE_MONITOR
-	if (mors->hw->conf.flags & IEEE80211_CONF_MONITOR) {
+	if (mors->monitor_mode) {
 		morse_mon_rx(mors, skb, hdr_rx_status);
 		/* If we have a monitor interface, don't bother doing any
 		 * other work on the SKB as we only support a single interface
@@ -5887,6 +5995,8 @@ void morse_mac_skb_recv(struct morse *mors,
 		goto exit;
 	}
 #endif
+
+	vif = morse_get_vif_from_rx_status(mors, hdr_rx_status);
 
 	ies_mask = morse_dot11ah_ies_mask_alloc();
 	if (!ies_mask)
@@ -6074,13 +6184,6 @@ static void morse_mac_config_wiphy_flags(struct morse *mors)
 	wiphy->flags |= WIPHY_FLAG_HAS_CHANNEL_SWITCH;
 	wiphy->flags |= WIPHY_FLAG_IBSS_RSN;
 	wiphy->flags |= WIPHY_FLAG_AP_UAPSD;
-#ifdef MORSE_MAC_CONFIG_WIPHY
-	wiphy->flags |= WIPHY_FLAG_SUPPORTS_TDLS;
-	wiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL;
-#endif
-	/* Disable wiphy flags not applicable for fullmac */
-	if (is_fullmac_mode())
-		wiphy->flags &= ~WIPHY_FLAG_AP_UAPSD;
 
 	/* If the driver was loaded with enable_ps=0, ensure cfg80211 is aware that
 	 * we can't enable powersave.
@@ -6165,23 +6268,6 @@ static void morse_mac_config_wiphy(struct morse *mors)
 		wiphy->max_sched_scan_plan_interval = U32_MAX / 1000;
 		wiphy->max_sched_scan_plan_iterations = U32_MAX;
 	}
-
-#ifdef MORSE_MAC_CONFIG_WIPHY
-	wiphy->available_antennas_rx = 0;
-	wiphy->available_antennas_tx = 0;
-
-	wiphy->features |= NL80211_FEATURE_STATIC_SMPS;
-
-	wiphy->features |= NL80211_FEATURE_DYNAMIC_SMPS;
-
-	wiphy->max_scan_ssids = WLAN_SCAN_PARAMS_MAX_SSID;
-	wiphy->max_scan_ie_len = WLAN_SCAN_PARAMS_MAX_IE_LEN;
-
-	wiphy->max_remain_on_channel_duration = 5000;
-	wiphy->features |= NL80211_FEATURE_AP_MODE_CHAN_WIDTH_CHANGE | NL80211_FEATURE_AP_SCAN;
-
-	wiphy->max_ap_assoc_sta = max_num_stations;
-#endif
 }
 
 static void morse_mac_config_ieee80211_hw(struct morse *mors, struct ieee80211_hw *hw)
@@ -6262,17 +6348,6 @@ static void morse_mac_cleanup_during_restart(struct morse *mors)
 {
 	u16 if_idx;
 
-	if (is_fullmac_mode()) {
-		if (mors->scan_req) {
-			struct cfg80211_scan_info info = {
-				.aborted = true,
-			};
-			cfg80211_scan_done(mors->scan_req, &info);
-			mors->scan_req = NULL;
-		}
-		return;
-	}
-
 	for (if_idx = 0; if_idx < mors->max_vifs; if_idx++) {
 		struct ieee80211_vif *vif = morse_get_vif_from_vif_id(mors, if_idx);
 		struct morse_vif *mors_vif;
@@ -6289,7 +6364,9 @@ static void morse_mac_cleanup_during_restart(struct morse *mors)
 			if (deinit_beacon)
 				morse_beacon_finish(mors_vif);
 			morse_ndp_probe_req_resp_finish(mors_vif);
+			morse_bss_stats_deinit(mors_vif);
 			morse_twt_finish_vif(mors, mors_vif);
+			morse_raw_finish(mors_vif);
 			break;
 		case NL80211_IFTYPE_ADHOC:
 		case NL80211_IFTYPE_MESH_POINT:
@@ -6328,6 +6405,8 @@ static int morse_mac_restart(struct morse *mors)
 {
 	int ret;
 	u32 chip_id;
+	const bool reset_hw = true;
+	const bool reattach_hw = false;
 
 	dev_warn(mors->dev, "%s: Restarting HW", __func__);
 	lockdep_assert_held(&mors->lock);
@@ -6361,6 +6440,8 @@ static int morse_mac_restart(struct morse *mors)
 	cancel_work_sync(&mors->tx_stale_work);
 	mors->chip_if->event_flags = 0;
 	mors->cfg->ops->flush_tx_data(mors);
+	if (mors->cfg->ops->flush_cmds)
+		mors->cfg->ops->flush_cmds(mors);
 
 	if (test_and_clear_bit(MORSE_STATE_FLAG_DO_COREDUMP, &mors->state_flags)) {
 		dev_warn(mors->dev, "%s: Generating core-dump (reason:%s)", __func__,
@@ -6385,10 +6466,13 @@ static int morse_mac_restart(struct morse *mors)
 		goto exit;
 	}
 
-	morse_mac_cleanup_during_restart(mors);
+	if (is_fullmac_mode())
+		morse_wiphy_cleanup(mors);
+	else
+		morse_mac_cleanup_during_restart(mors);
 
 	/* reload the firmware */
-	ret = morse_firmware_exec_ndr(mors);
+	ret = morse_firmware_prepare_and_init(mors, reset_hw, reattach_hw);
 	if (ret < 0) {
 		MORSE_ERR(mors, "%s: Failed to execute NDR (errno:%d)", __func__, ret);
 		goto exit;
@@ -6600,7 +6684,7 @@ static int morse_ieee80211_init(struct morse *mors)
 	 * Ref: https://lwn.net/Articles/507065/
 	 *      https://lwn.net/Articles/757643/
 	 */
-	hw->tx_sk_pacing_shift = 3;
+	hw->tx_sk_pacing_shift = SK_PACING_SHIFT;
 
 	SET_IEEE80211_PERM_ADDR(hw, mors->macaddr);
 	morse_mac_config_ieee80211_hw(mors, hw);
@@ -6829,7 +6913,13 @@ static int morse_mac_init(struct morse *mors)
 
 	mors->vif = kcalloc(mors->max_vifs, sizeof(*mors->vif), GFP_KERNEL);
 
-	morse_mac_config_wiphy(mors);
+	mors->mon_if.id = INVALID_VIF_ID;
+
+	/* Fullmac configures its wiphy structure in morse_wiphy_init(), called above.
+	 * In softmac we need to do it here.
+	 */
+	if (!is_fullmac_mode())
+		morse_mac_config_wiphy(mors);
 
 	morse_mac_config_ht_cap(mors);
 	morse_mac_config_vht_base_cap(mors);
@@ -6895,6 +6985,8 @@ int morse_mac_register(struct morse *mors)
 		goto err;
 	}
 
+	morse_led_init(mors);
+
 	/* We manage our own regdb, as Linux has no S1G support yet */
 	mors->wiphy->regulatory_flags = REGULATORY_WIPHY_SELF_MANAGED;
 	mors->wiphy->reg_notifier = morse_reg_notifier;
@@ -6906,6 +6998,7 @@ int morse_mac_register(struct morse *mors)
 		ret = ieee80211_register_hw(hw);
 	if (ret) {
 		MORSE_ERR(mors, "ieee80211_register_hw failed %d\n", ret);
+		morse_led_exit(mors);
 		goto err;
 	}
 
@@ -6972,8 +7065,6 @@ int morse_mac_register(struct morse *mors)
 		morse_log_modparams(mors);
 #endif
 
-	morse_led_init(mors);
-
 	return ret;
 
 #ifdef CONFIG_MORSE_RC
@@ -6984,6 +7075,7 @@ err_free_mon:
 #endif
 
 err_unregister_hw:
+	morse_led_exit(mors);
 	ieee80211_unregister_hw(hw);
 err:
 	return ret;
@@ -7049,6 +7141,9 @@ struct morse *morse_mac_create(size_t priv_size, struct device *dev)
 	mutex_init(&mors->coredump.lock);
 	INIT_LIST_HEAD(&mors->coredump.crash.memory.regions);
 
+	/* Initialise hw_clock structure */
+	mutex_init(&mors->hw_clock.update_wait_lock);
+
 	mors->custom_configs.enable_ampdu = true;
 	mors->custom_configs.enable_subbands = enable_subbands;
 	mors->custom_configs.enable_arp_offload = enable_arp_offload;
@@ -7097,13 +7192,16 @@ static void morse_mac_deinit(struct morse *mors)
 		morse_ieee80211_deinit(mors);
 
 	mors->cfg->ops->flush_tx_data(mors);
+	if (mors->cfg->ops->flush_cmds)
+		mors->cfg->ops->flush_cmds(mors);
+
 	morse_mac_clear_mesh_list(mors);
 #if KERNEL_VERSION(5, 9, 0) <= MAC80211_VERSION_CODE
 	if (enable_airtime_fairness)
 		tasklet_kill(&mors->tasklet_txq);
 #endif
 
-	if (wiphy->iface_combinations) {
+	if (!is_fullmac_mode() && wiphy->iface_combinations) {
 		kfree(wiphy->iface_combinations->limits);
 		kfree(wiphy->iface_combinations);
 		wiphy->iface_combinations = NULL;

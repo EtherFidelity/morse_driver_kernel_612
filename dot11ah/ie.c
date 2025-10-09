@@ -611,3 +611,23 @@ void morse_dot11ah_insert_element(struct dot11ah_ies_mask *ies_mask, u8 eid,
 	memcpy(element->ptr, data, length);
 }
 EXPORT_SYMBOL(morse_dot11ah_insert_element);
+
+struct dot11ah_ies_mask *morse_dot11ah_ies_to_ies_mask(const u8 *ies, u16 ies_len)
+{
+	struct dot11ah_ies_mask *ies_mask = NULL;
+	int ret;
+
+	ies_mask = morse_dot11ah_ies_mask_alloc();
+	if (!ies_mask)
+		goto err;
+
+	ret = morse_dot11ah_parse_ies((u8 *)ies, ies_len, ies_mask);
+	if (ret)
+		goto err;
+
+	return ies_mask;
+err:
+	morse_dot11ah_ies_mask_free(ies_mask);
+	return NULL;
+}
+EXPORT_SYMBOL(morse_dot11ah_ies_to_ies_mask);

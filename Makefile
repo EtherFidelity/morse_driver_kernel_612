@@ -8,7 +8,7 @@ else
 endif
 
 # Set 0 to a version number. This is done to match the Linux expectations
-override MORSE_VERSION = "0-rel_1_15_3_2025_Apr_16"
+override MORSE_VERSION = "0-rel_1_16_4_2025_Sep_18"
 
 USING_CLANG := $(shell $(CC) -v 2>&1 | grep -c "clang version")
 
@@ -154,6 +154,7 @@ morse-y += hw_scan.o
 morse-y += coredump.o
 morse-y += peer.o
 morse-y += led.o
+morse-y += bss_stats.o
 morse-$(CONFIG_MORSE_MONITOR) += monitor.o
 morse-$(CONFIG_MORSE_SDIO) += sdio.o
 morse-$(CONFIG_MORSE_SPI) += spi.o
@@ -163,6 +164,7 @@ morse-$(CONFIG_MORSE_USER_ACCESS) += uaccess.o
 morse-$(CONFIG_MORSE_HW_TRACE) += hw_trace.o
 morse-$(CONFIG_MORSE_PAGESET_TRACE) += pageset_trace.o
 morse-$(CONFIG_MORSE_BUS_TRACE) += bus_trace.o
+morse-$(CONFIG_ANDROID) += apf.o
 
 ifeq ($(CONFIG_DISABLE_MORSE_RC),y)
 	morse-y += minstrel_rc.o
@@ -182,7 +184,7 @@ modules_install:
 	$(MAKE) MORSE_VERSION=$(MORSE_VERSION) -C $(KERNEL_SRC) M=$(SRC) modules_install
 
 clean:
-	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
+	rm -f  $(morse-y) *.o *~ core .depend .*.cmd *.ko *.mod.c
 	rm -f Module.markers Module.symvers modules.order
 	rm -rf .tmp_versions Modules.symvers
 	make -C ./dot11ah clean

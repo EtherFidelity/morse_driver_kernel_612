@@ -26,6 +26,8 @@
 #include "ocs.h"
 #include "mbssid.h"
 #include "mesh.h"
+#include "morse_commands.h"
+#include "wiphy.h"
 
 #define MM_BA_TIMEOUT (5000)
 #define MM_MAX_COMMAND_RETRY 2
@@ -58,7 +60,7 @@ struct morse_cmd_resp_cb {
 /* Set driver to chip command timeout: max to wait (in ms) before failing the command */
 static u32 default_cmd_timeout_ms __read_mostly = MM_CMD_DEFAULT_TIMEOUT_MS;
 module_param(default_cmd_timeout_ms, uint, 0644);
-MODULE_PARM_DESC(default_cmd_timeout_ms, "Set default command timeout (in ms)");
+MODULE_PARM_DESC(default_cmd_timeout_ms, "Default command timeout (in ms)");
 
 static void morse_cmd_init(struct morse *mors, struct morse_cmd_header *hdr,
 			   enum morse_cmd_id cmd, u16 vif_id, u16 len)
@@ -480,10 +482,6 @@ static int morse_cmd_drv(struct morse *mors, struct ieee80211_vif *vif, struct m
 			ret = -EFAULT;
 		}
 		break;
-	case MORSE_CMD_ID_COREDUMP:
-		ret = morse_cmd_coredump(mors);
-		morse_cmd_resp_init(resp, 4, ret);
-		break;
 	case MORSE_CMD_ID_SET_S1G_OP_CLASS: {
 		struct morse_cmd_req_set_s1g_op_class *req_op =
 			(struct morse_cmd_req_set_s1g_op_class *)req;
@@ -498,12 +496,7 @@ static int morse_cmd_drv(struct morse *mors, struct ieee80211_vif *vif, struct m
 		ret = morse_cmd_send_wake_action_frame(mors, req);
 		morse_cmd_resp_init(resp, 4, ret);
 		break;
-	case MORSE_CMD_ID_VENDOR_IE_CONFIG: {
-		ret = morse_vendor_ie_handle_config_cmd(mors_vif,
-					      (struct morse_cmd_req_vendor_ie_config *)req);
-		morse_cmd_resp_init(resp, 4, ret);
-		break;
-	}
+
 	case MORSE_CMD_ID_DRIVER_SET_DUTY_CYCLE: {
 		struct morse_cmd_req_set_duty_cycle *duty_req =
 		    (struct morse_cmd_req_set_duty_cycle *)req;
@@ -575,10 +568,6 @@ static int morse_cmd_drv(struct morse *mors, struct ieee80211_vif *vif, struct m
 		}
 		morse_cmd_resp_init(resp, 4, ret);
 		break;
-	case MORSE_CMD_ID_GET_HW_VERSION:
-		ret = morse_cmd_get_hw_version(mors, resp);
-		resp->status = cpu_to_le32(ret);
-		break;
 	case MORSE_CMD_ID_MBSSID:
 		ret = morse_command_process_bssid_info(mors_vif,
 						       (struct morse_cmd_req_mbssid *)req);
@@ -604,6 +593,11 @@ static int morse_cmd_drv(struct morse *mors, struct ieee80211_vif *vif, struct m
 	case MORSE_CMD_ID_DYNAMIC_PEERING_CONFIG:
 		ret = morse_cmd_process_dynamic_peering_conf(mors_vif,
 					     (struct morse_cmd_req_dynamic_peering_config *)req);
+		morse_cmd_resp_init(resp, 4, ret);
+		break;
+	case MORSE_CMD_ID_CONFIG_BSS_STATS:
+		ret = morse_cmd_process_bss_stats_conf(mors_vif,
+					     (struct morse_cmd_req_config_bss_stats *)req);
 		morse_cmd_resp_init(resp, 4, ret);
 		break;
 	default:
@@ -1165,16 +1159,16 @@ static int morse_cmd_vendor_set_channel(struct morse *mors, int cmd_len,
 		return ret;
 
 	/* Store info */
-	if (le32_to_cpu(drv_req->op_chan_freq_hz) != DEFAULT_FREQUENCY)
+	if (le32_to_cpu(drv_req->op_chan_freq_hz) != MORSE_CMD_CHANNEL_FREQ_NOT_SET)
 		stored_info->op_chan_freq_hz = le32_to_cpu(drv_req->op_chan_freq_hz);
 
-	if (drv_req->pri_1mhz_chan_idx != DEFAULT_1MHZ_PRIMARY_CHANNEL_INDEX)
+	if (drv_req->pri_1mhz_chan_idx != MORSE_CMD_CHANNEL_IDX_NOT_SET)
 		stored_info->pri_1mhz_chan_idx = drv_req->pri_1mhz_chan_idx;
 
-	if (drv_req->op_bw_mhz != DEFAULT_BANDWIDTH)
+	if (drv_req->op_bw_mhz != MORSE_CMD_CHANNEL_BW_NOT_SET)
 		stored_info->op_bw_mhz = drv_req->op_bw_mhz;
 
-	if (drv_req->pri_bw_mhz != DEFAULT_BANDWIDTH)
+	if (drv_req->pri_bw_mhz != MORSE_CMD_CHANNEL_BW_NOT_SET)
 		stored_info->pri_bw_mhz = drv_req->pri_bw_mhz;
 
 	/* Validate that primary does not exceed operating */
@@ -1199,6 +1193,37 @@ static int morse_cmd_vendor_set_channel(struct morse *mors, int cmd_len,
 		morse_mac_set_txpower(mors, chan_s1g->ch.max_reg_power);
 
 	return 0;
+}
+
+/**
+ * morse_cmd_vendor_dhcp_offload() - Handle DHCP offload command being sent to chip
+ *
+ * @mors:	Global Morse struct
+ * @resp:	Response for the command
+ * @req:	Command request
+ *
+ * @return  Error code on failure, 0 otherwise
+ */
+static int morse_cmd_vendor_dhcp_offload(struct morse *mors, struct morse_cmd_resp_vendor *resp,
+					 const struct morse_cmd_req_vendor *req)
+{
+	int ret;
+	struct morse_cmd_req_dhcp_offload *dhcp_req =
+		(struct morse_cmd_req_dhcp_offload *)req;
+	struct morse_cmd_resp_dhcp_offload *dhcp_resp =
+		(struct morse_cmd_resp_dhcp_offload *)resp;
+
+	ret = morse_cmd_tx(mors, (struct morse_cmd_resp *)resp,
+				   (struct morse_cmd_req *)req, sizeof(*resp), 0, __func__);
+
+	/* A successful DHCP offload enable command may require a state update */
+	if (ret == 0 && le32_to_cpu(dhcp_req->opcode) == MORSE_CMD_DHCP_OPCODE_ENABLE) {
+		if (le32_to_cpu(dhcp_resp->retcode) == MORSE_CMD_DHCP_RETCODE_SUCCESS) {
+			mors->custom_configs.enable_dhcpc_offload = true;
+			MORSE_DBG(mors, "%s: dhcp client hw offload enabled\n", __func__);
+		}
+	}
+	return ret;
 }
 
 static int morse_cmd_vendor_force_power_mode(struct morse *mors, struct morse_cmd_resp_vendor *resp,
@@ -1451,54 +1476,21 @@ static int morse_cmd_vendor_get_set_params(struct morse *mors, struct ieee80211_
 	return ret;
 }
 
-int morse_req_vendor(struct morse *mors, struct ieee80211_vif *vif,
-		     const struct morse_cmd_req_vendor *req, int cmd_len,
-		     struct morse_cmd_resp_vendor *resp, int *resp_len)
+/**
+ * morse_cmd_vendor_postprocess() - Post process vendor command after it was handled by the chip.
+ */
+static void morse_cmd_vendor_postprocess(struct morse *mors, struct morse_vif *mors_vif,
+					 const struct morse_cmd_req_vendor *req,
+					 struct morse_cmd_resp_vendor *resp)
 {
-	int ret;
-	u16 message_id;
-	struct morse_vif *mors_vif = ieee80211_vif_to_morse_vif(vif);
-
-	resp->hdr.message_id = req->hdr.message_id;
-	message_id = le16_to_cpu(req->hdr.message_id);
-
-	if (message_id >= MORSE_CMD_ID_DRIVER_START &&
-	    message_id <= MORSE_CMD_ID_DRIVER_END) {
-		ret = morse_cmd_drv(mors, vif, (struct morse_cmd_resp *)resp,
-				    (struct morse_cmd_req *)req, sizeof(*resp), 0);
-		if (ret)
-			MORSE_ERR(mors, "%s error %d\n", __func__, ret);
-	} else if (message_id == MORSE_CMD_ID_SET_CHANNEL) {
-		ret = morse_cmd_vendor_set_channel(mors, cmd_len,
-				(struct morse_cmd_resp_set_channel *)resp,
-				(struct morse_cmd_req_set_channel *)req);
-	} else if (message_id == MORSE_CMD_ID_STANDBY_MODE) {
-		ret = morse_cmd_vendor_standby(mors, resp, req);
-	} else if (message_id == MORSE_CMD_ID_FORCE_POWER_MODE) {
-		ret = morse_cmd_vendor_force_power_mode(mors, resp, req);
-	} else if (message_id == MORSE_CMD_ID_GET_SET_GENERIC_PARAM) {
-		ret = morse_cmd_vendor_get_set_params(mors, vif,
-						(struct morse_cmd_resp_get_set_generic_param *)resp,
-						(struct morse_cmd_req_get_set_generic_param *)req);
-	} else {
-		ret = morse_cmd_tx(mors, (struct morse_cmd_resp *)resp,
-				   (struct morse_cmd_req *)req, sizeof(*resp), 0, __func__);
-	}
-	if (ret) {
-		resp->hdr.host_id = req->hdr.host_id;
-		resp->status = cpu_to_le32(ret);
-		*resp_len = sizeof(struct morse_cmd_resp);
-		goto exit;
-	}
-	*resp_len = le16_to_cpu(resp->hdr.len) + sizeof(struct morse_cmd_header);
-
-	/** Commands that were successful and need to be post processed */
+	u16 message_id = le16_to_cpu(req->hdr.message_id);
+	struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
 
 	switch (message_id) {
 	case MORSE_CMD_ID_SET_CONTROL_RESPONSE:
 		{
 			struct morse_cmd_req_set_control_response *cr_req =
-				(struct morse_cmd_req_set_control_response *)req;
+			    (struct morse_cmd_req_set_control_response *)req;
 
 			if (mors_vif) {
 				if (cr_req->direction)
@@ -1543,9 +1535,9 @@ int morse_req_vendor(struct morse *mors, struct ieee80211_vif *vif,
 	case MORSE_CMD_ID_GET_SET_GENERIC_PARAM:
 		{
 			struct morse_cmd_req_get_set_generic_param *get_set_cmd =
-				(struct morse_cmd_req_get_set_generic_param *)req;
+			    (struct morse_cmd_req_get_set_generic_param *)req;
 			struct morse_cmd_resp_get_set_generic_param *get_set_resp =
-				(struct morse_cmd_resp_get_set_generic_param *)resp;
+			    (struct morse_cmd_resp_get_set_generic_param *)resp;
 
 			if (le32_to_cpu(get_set_cmd->param_id) ==
 					MORSE_CMD_PARAM_ID_EXTRA_ACK_TIMEOUT_ADJUST_US) {
@@ -1559,23 +1551,141 @@ int morse_req_vendor(struct morse *mors, struct ieee80211_vif *vif,
 			}
 		}
 		break;
+	case MORSE_CMD_ID_GET_TSF:
+		{
+			struct morse_cmd_resp_get_tsf *get_tsf_resp =
+				(struct morse_cmd_resp_get_tsf *)resp;
+
+			if (mors_vif)
+				MORSE_DBG(mors, "vif[%u] tsf:%llu (hw clock:%llu)\n",
+					  mors_vif->id, get_tsf_resp->now_tsf,
+					  get_tsf_resp->now_chip_ts);
+		}
+		break;
 	}
+}
+
+/* Handlers for driver commands which are common between softmac and fullmac. */
+static int morse_cmd_drv_common(struct morse *mors, struct morse_vif *mors_vif,
+				struct morse_cmd_resp *resp, struct morse_cmd_req *req)
+{
+	int ret;
+
+	switch (le16_to_cpu(req->hdr.message_id)) {
+	case MORSE_CMD_ID_COREDUMP:
+		ret = morse_cmd_coredump(mors);
+		morse_cmd_resp_init(resp, 4, ret);
+		break;
+	case MORSE_CMD_ID_GET_HW_VERSION:
+		ret = morse_cmd_get_hw_version(mors, resp);
+		resp->status = cpu_to_le32(ret);
+		break;
+	case MORSE_CMD_ID_VENDOR_IE_CONFIG:
+		ret = morse_vendor_ie_handle_config_cmd(mors_vif,
+							(struct morse_cmd_req_vendor_ie_config *)
+							req);
+		morse_cmd_resp_init(resp, 4, ret);
+		break;
+	default:
+		ret = -ENOTSUPP;
+	}
+	return ret;
+}
+
+static int morse_cmd_drv_fullmac(struct morse *mors, struct morse_vif *mors_vif,
+				 struct morse_cmd_resp *resp, struct morse_cmd_req *req)
+{
+	int ret;
+
+	switch (le16_to_cpu(req->hdr.message_id)) {
+	case MORSE_CMD_ID_SET_AMPDU:
+		ret = morse_cmd_tx(mors, resp, req, sizeof(*resp), 0, __func__);
+		break;
+	case MORSE_CMD_ID_DRIVER_SET_DUTY_CYCLE:
+		req->hdr.message_id = cpu_to_le16(MORSE_CMD_ID_SET_DUTY_CYCLE);
+		ret = morse_cmd_tx(mors, resp, req, le16_to_cpu(resp->hdr.len), 0, __func__);
+		morse_cmd_resp_init(resp, 4, ret);
+		break;
+	default:
+		/* TODO: Implement required driver cmd for FullMAC */
+		ret = -ENOTSUPP;
+		morse_cmd_resp_init(resp, 4, ret);
+	}
+
+	return ret;
+}
+
+int morse_cmd_vendor(struct morse *mors, struct morse_vif *mors_vif,
+		     const struct morse_cmd_req_vendor *req, int cmd_len,
+		     struct morse_cmd_resp_vendor *resp, int *resp_len)
+{
+	int ret;
+	u16 message_id;
+
+	resp->hdr.message_id = req->hdr.message_id;
+	message_id = le16_to_cpu(req->hdr.message_id);
+
+	if (message_id >= MORSE_CMD_ID_DRIVER_START &&
+	    message_id <= MORSE_CMD_ID_DRIVER_END) {
+		ret = morse_cmd_drv_common(mors, mors_vif, (struct morse_cmd_resp *)resp,
+					   (struct morse_cmd_req *)req);
+		if (ret == -ENOTSUPP && is_fullmac_mode()) {
+			ret = morse_cmd_drv_fullmac(mors, mors_vif, (struct morse_cmd_resp *)resp,
+						    (struct morse_cmd_req *)req);
+		} else if (ret == -ENOTSUPP) {
+			struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
+
+			ret = morse_cmd_drv(mors, vif, (struct morse_cmd_resp *)resp,
+					    (struct morse_cmd_req *)req, sizeof(*resp), 0);
+			if (ret)
+				MORSE_ERR(mors, "%s error %d\n", __func__, ret);
+		}
+	} else if (!is_fullmac_mode() && message_id == MORSE_CMD_ID_SET_CHANNEL) {
+		ret = morse_cmd_vendor_set_channel(mors, cmd_len,
+				(struct morse_cmd_resp_set_channel *)resp,
+				(struct morse_cmd_req_set_channel *)req);
+	} else if (message_id == MORSE_CMD_ID_STANDBY_MODE) {
+		ret = morse_cmd_vendor_standby(mors, resp, req);
+	} else if (message_id == MORSE_CMD_ID_FORCE_POWER_MODE) {
+		ret = morse_cmd_vendor_force_power_mode(mors, resp, req);
+	} else if (!is_fullmac_mode() && message_id == MORSE_CMD_ID_GET_SET_GENERIC_PARAM) {
+		struct ieee80211_vif *vif = morse_vif_to_ieee80211_vif(mors_vif);
+
+		ret = morse_cmd_vendor_get_set_params(mors, vif,
+			(struct morse_cmd_resp_get_set_generic_param *)resp,
+			(struct morse_cmd_req_get_set_generic_param *)req);
+	} else if (message_id == MORSE_CMD_ID_DHCP_OFFLOAD) {
+		ret = morse_cmd_vendor_dhcp_offload(mors, resp, req);
+	} else {
+		ret = morse_cmd_tx(mors, (struct morse_cmd_resp *)resp,
+				   (struct morse_cmd_req *)req, sizeof(*resp), 0, __func__);
+	}
+	if (ret) {
+		resp->hdr.host_id = req->hdr.host_id;
+		resp->status = cpu_to_le32(ret);
+		*resp_len = sizeof(struct morse_cmd_resp);
+		goto exit;
+	}
+	*resp_len = le16_to_cpu(resp->hdr.len) + sizeof(struct morse_cmd_header);
+
+	if (!is_fullmac_mode())
+		morse_cmd_vendor_postprocess(mors, mors_vif, req, resp);
 
 exit:
 	return ret;
 }
 
-int morse_wiphy_cmd_vendor(struct morse *mors,
-		     const struct morse_cmd_req_vendor *req, int cmd_len,
-		     struct morse_cmd_resp_vendor *resp, int *resp_len)
+int morse_hw_cmd_vendor(struct morse *mors,
+			const struct morse_cmd_req_vendor *req, int cmd_len,
+			struct morse_cmd_resp_vendor *resp, int *resp_len)
 {
 	int ret;
 
 	resp->hdr.message_id = req->hdr.message_id;
 
 	if (le16_to_cpu(req->hdr.message_id) == MORSE_CMD_ID_COREDUMP) {
-		ret = morse_cmd_drv(mors, NULL, (struct morse_cmd_resp *)resp,
-				    (struct morse_cmd_req *)req, sizeof(*resp), 0);
+		ret = morse_cmd_drv_common(mors, NULL, (struct morse_cmd_resp *)resp,
+					   (struct morse_cmd_req *)req);
 	} else {
 		/* Command not supported yet */
 		ret = -ENOTSUPP;
@@ -1590,7 +1700,8 @@ int morse_wiphy_cmd_vendor(struct morse *mors,
 
 exit:
 	if (ret)
-		MORSE_ERR(mors, "%s: failed (ret:%d)\n", __func__, ret);
+		MORSE_ERR(mors, "%s: command id:%d failed (ret:%d)\n",
+			__func__, le16_to_cpu(req->hdr.message_id), ret);
 	return ret;
 }
 
@@ -1957,12 +2068,14 @@ int morse_cmd_get_hw_version(struct morse *mors, struct morse_cmd_resp *resp)
 int morse_cmd_set_frag_threshold(struct morse *mors, u32 frag_threshold)
 {
 	int ret;
-	struct morse_cmd_req_set_frag_threshold req;
-	struct morse_cmd_resp_set_frag_threshold resp;
+	struct morse_cmd_req_get_set_generic_param req = {
+		.param_id = cpu_to_le32(MORSE_CMD_PARAM_ID_FRAGMENT_THRESHOLD),
+		.action = cpu_to_le32(MORSE_CMD_PARAM_ACTION_SET),
+		.value = cpu_to_le32(frag_threshold),
+	};
+	struct morse_cmd_resp_get_set_generic_param resp;
 
-	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_SET_FRAG_THRESHOLD, 0, sizeof(req));
-
-	req.frag_threshold = cpu_to_le32(frag_threshold);
+	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_GET_SET_GENERIC_PARAM, 0, sizeof(req));
 
 	ret = morse_cmd_tx(mors, (struct morse_cmd_resp *)&resp,
 			   (struct morse_cmd_req *)&req, sizeof(resp), 0, __func__);
@@ -2196,7 +2309,7 @@ int morse_cmd_start_scan(struct morse *mors,
 	if (!req)
 		return -ENOMEM;
 
-	morse_cmd_init(mors, &req->hdr, MORSE_CMD_ID_START_SCAN, 0, sizeof(*req));
+	morse_cmd_init(mors, &req->hdr, MORSE_CMD_ID_START_SCAN, 0, req_size);
 
 	req->dwell_time_ms = cpu_to_le32(dwell_time_ms);
 	if (extra_ies_len) {
@@ -2227,39 +2340,82 @@ int morse_cmd_abort_scan(struct morse *mors)
 	return morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)&req, 0, 0, __func__);
 }
 
-int morse_cmd_connect(struct morse *mors, const u8 *ssid, size_t ssid_len,
-		      enum nl80211_auth_type auth_type,
-		      const u8 *sae_pwd, size_t sae_pwd_len)
+static int morse_cmd_connect_deprecated(struct morse *mors,
+					const struct morse_wiphy_connect_params *params)
 {
-	struct morse_cmd_req_connect req;
+	struct morse_cmd_req_connect_deprecated *req;
+	int ret;
 
-	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_CONNECT, 0, sizeof(req));
-
-	switch (auth_type) {
-	case NL80211_AUTHTYPE_OPEN_SYSTEM:
-		req.auth_type = MORSE_CMD_CONNECT_AUTH_TYPE_OPEN;
-		break;
-	case NL80211_AUTHTYPE_SAE:
-		req.auth_type = MORSE_CMD_CONNECT_AUTH_TYPE_SAE;
-		break;
-	case NL80211_AUTHTYPE_AUTOMATIC:
-		req.auth_type = MORSE_CMD_CONNECT_AUTH_TYPE_AUTOMATIC;
-		break;
-	default:
+	if (params->roam)
 		return -EOPNOTSUPP;
+
+	req = kzalloc(sizeof(*req) + params->extra_assoc_ies_len, GFP_KERNEL);
+
+	morse_cmd_init(mors, &req->hdr, MORSE_CMD_ID_CONNECT_DEPRECATED, 0,
+	    sizeof(*req) + params->extra_assoc_ies_len);
+
+	req->auth_type = params->auth_type;
+
+	if (params->ssid_len < 1 || params->ssid_len > sizeof(req->ssid)) {
+		ret = -EINVAL;
+		goto out;
+	}
+	memcpy(req->ssid, params->ssid, params->ssid_len);
+	req->ssid_len = params->ssid_len;
+
+	if (params->sae_pwd_len > sizeof(req->sae_pwd)) {
+		ret = -EINVAL;
+		goto out;
+	}
+	memcpy(req->sae_pwd, params->sae_pwd, params->sae_pwd_len);
+	req->sae_pwd_len = params->sae_pwd_len;
+
+	if (params->extra_assoc_ies_len > MORSE_CMD_EXTRA_ASSOC_IES_MAX_LEN) {
+		ret = -EINVAL;
+		goto out;
 	}
 
-	if (ssid_len < 1 || ssid_len > sizeof(req.ssid))
-		return -EINVAL;
-	memcpy(req.ssid, ssid, ssid_len);
-	req.ssid_len = ssid_len;
+	if (params->extra_assoc_ies_len) {
+		memcpy(req->extra_assoc_ies, params->extra_assoc_ies, params->extra_assoc_ies_len);
+		req->extra_assoc_ies_len = cpu_to_le16(params->extra_assoc_ies_len);
+	}
 
-	if (sae_pwd_len > sizeof(req.sae_pwd))
-		return -EINVAL;
-	memcpy(req.sae_pwd, sae_pwd, sae_pwd_len);
-	req.sae_pwd_len = sae_pwd_len;
+	ret = morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)req, 0, 0, __func__);
 
-	return morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)&req, 0, 0, __func__);
+out:
+	kfree(req);
+	return ret;
+}
+
+int morse_cmd_connect(struct morse *mors, const struct morse_wiphy_connect_params *params)
+{
+	struct morse_cmd_req_connect *req;
+	size_t req_len;
+	u32 flags;
+	int ret;
+
+	flags = 0;
+	if (params->roam)
+		flags |= MORSE_CMD_CONNECT_FLAG_ROAM;
+
+	req_len = morse_wiphy_connect_get_command_size(params);
+	req = kzalloc(req_len, GFP_KERNEL);
+	if (!req)
+		return -ENOMEM;
+
+	morse_cmd_init(mors, &req->hdr, MORSE_CMD_ID_CONNECT, 0, req_len);
+	req->flags = cpu_to_le32(flags);
+	morse_wiphy_connect_insert_tlvs(req->variable, params);
+
+	ret = morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)req, 0, 0, __func__);
+
+	kfree(req);
+
+	if (ret == MORSE_RET_CMD_NOT_HANDLED)
+		/* Fall back to the original command for older firmware. */
+		return morse_cmd_connect_deprecated(mors, params);
+
+	return ret;
 }
 
 int morse_cmd_disconnect(struct morse *mors)
@@ -2305,4 +2461,107 @@ int morse_cmd_get_connection_state(struct morse *mors, s8 *signal,
 	*beacon_interval_tu = le16_to_cpu(cfm.beacon_interval_tu);
 
 	return 0;
+}
+
+int morse_cmd_set_cqm_rssi(struct morse *mors, u16 vif_id, s32 cqm_rssi_thold, u32 cqm_rssi_hyst)
+{
+	struct morse_cmd_req_set_cqm_rssi req;
+	int ret;
+
+	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_SET_CQM_RSSI, 0, sizeof(req));
+	req.threshold = cpu_to_le32(cqm_rssi_thold);
+	req.hysteresis = cpu_to_le32(cqm_rssi_hyst);
+
+	ret = morse_cmd_tx(mors, NULL, (struct morse_cmd_req *)&req, 0, 0, __func__);
+
+	return ret;
+}
+
+int morse_cmd_get_apf_capabilities(struct morse *mors, struct morse_vif *mors_vif,
+								   u32 *version, u32 *max_len)
+{
+	int ret;
+	struct morse_cmd_req_get_apf_capabilities req;
+	struct morse_cmd_resp_get_apf_capabilities *resp;
+
+	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
+	if (!resp)
+		return -ENOMEM;
+
+	morse_cmd_init(mors, &req.hdr, MORSE_CMD_ID_GET_APF_CAPABILITIES, 0, sizeof(req));
+	ret = morse_cmd_tx(mors, (struct morse_cmd_resp *)resp, (struct morse_cmd_req *)&req,
+					   sizeof(struct morse_cmd_resp_get_apf_capabilities), 0,
+					   __func__);
+	if (ret) {
+		MORSE_ERR(mors, "%s, morse_cmd_tx failed, ret=%d\n", __func__, ret);
+		ret = -EINVAL;
+		goto exit;
+	}
+	MORSE_INFO(mors, "%s: APF capabilities: ver=%d, max_len=%d\n", __func__,
+			   resp->version, resp->max_length);
+
+	if (!resp->version || !resp->max_length) {
+		MORSE_ERR(mors, "%s Invalid APF version or length\n", __func__);
+		*max_len = 0;
+		ret = -EINVAL;
+		goto exit;
+	}
+	*version = resp->version;
+	*max_len = le32_to_cpu(resp->max_length);
+exit:
+	kfree(resp);
+	return ret;
+}
+
+int morse_cmd_read_write_apf(struct morse *mors, struct morse_vif *mors_vif, bool write,
+			      u16 program_len, u8 *program, u32 offset)
+{
+	struct morse_cmd_req_read_write_apf *req;
+	struct morse_cmd_resp_read_write_apf *resp;
+	int ret;
+	u16 req_len = sizeof(*req);
+	u16 resp_len = sizeof(*resp);
+
+	if (write)
+		req_len += program_len;
+	else
+		resp_len += program_len;
+
+	req_len = ROUND_BYTES_TO_WORD(req_len);
+	resp_len = ROUND_BYTES_TO_WORD(resp_len);
+
+	req = kzalloc(req_len, GFP_KERNEL);
+	if (!req)
+		return -ENOMEM;
+
+	resp = kzalloc(resp_len, GFP_KERNEL);
+	if (!resp) {
+		kfree(req);
+		return -ENOMEM;
+	}
+
+	req->write = write;
+	if (write) {
+		req->program_length = cpu_to_le16(program_len);
+		memcpy(req->program, program, program_len);
+	} else {
+		req->offset = cpu_to_le32(offset);
+		req->program_length = cpu_to_le16(program_len);
+	}
+	morse_cmd_init(mors, &req->hdr, MORSE_CMD_ID_READ_WRITE_APF, 0, req_len);
+	ret = morse_cmd_tx(mors, (struct morse_cmd_resp *)resp, (struct morse_cmd_req *)req,
+					   resp_len, 0, __func__);
+	if (ret) {
+		MORSE_ERR(mors, "%s, morse_cmd_tx failed, ret=%d\n", __func__, ret);
+		ret = -EINVAL;
+	} else if (!write) {
+		memcpy(program, resp->program, program_len);
+		MORSE_INFO(mors, "%s:read %u bytes\n", __func__, resp->program_length);
+	}
+	MORSE_INFO(mors, "%s: write=%d, program_len=%d, offset=%d\n", __func__,
+			   write, program_len, offset);
+
+	kfree(req);
+	kfree(resp);
+	return ret;
 }

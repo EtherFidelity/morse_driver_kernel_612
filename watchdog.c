@@ -171,12 +171,12 @@ exit:
 	return ret;
 }
 
-int morse_watchdog_get_interval(struct morse *mors)
+uint morse_watchdog_get_interval(struct morse *mors)
 {
 	return mors->watchdog.interval_secs;
 }
 
-int morse_watchdog_init(struct morse *mors, int interval_s,
+int morse_watchdog_init(struct morse *mors, uint interval_s,
 						watchdog_callback_t ping)
 {
 	int ret = 0;

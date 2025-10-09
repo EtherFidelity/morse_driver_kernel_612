@@ -281,6 +281,18 @@ static const struct morse_dot11ah_ch_map mors_eu_map = {
 		.s1g_channels = eu_s1g_channels,
 };
 
+/* GB map */
+static const struct morse_dot11ah_ch_map mors_gb_map = {
+		.alpha = CHANNEL_ALPHA_GB,
+		.prim_1mhz_channel_loc_to_idx = &prim_1mhz_channel_loc_to_idx_default,
+		.calculate_primary_s1g = &calculate_primary_s1g_channel_default,
+		.s1g_op_chan_pri_chan_to_5g = &s1g_op_chan_pri_chan_to_5g_default,
+		.get_pri_1mhz_chan = &get_pri_1mhz_chan_default,
+		.transform_overlapping_5g_chan = NULL,
+		.num_mapped_channels = ARRAY_SIZE(gb_s1g_channels),
+		.s1g_channels = gb_s1g_channels,
+};
+
 /* IN map */
 static const struct morse_dot11ah_ch_map mors_in_map = {
 		.alpha = CHANNEL_ALPHA_IN,
@@ -345,6 +357,7 @@ const struct morse_dot11ah_ch_map *mapped_channels[] = {
 	&mors_au_map,
 	&mors_ca_map,
 	&mors_eu_map,
+	&mors_gb_map,
 	&mors_in_map,
 	&mors_jp_map,
 	&mors_kr_map,
@@ -398,6 +411,9 @@ static enum morse_dot11ah_region morse_reg_get_region(const char *alpha)
 
 	if (!strcmp(alpha, "EU"))
 		return MORSE_EU;
+
+	if (!strcmp(alpha, "GB"))
+		return MORSE_GB;
 
 	if (!strcmp(alpha, "IN"))
 		return MORSE_IN;
@@ -588,6 +604,7 @@ int morse_dot11ah_channel_to_freq_khz(int chan)
 	case MORSE_US:
 		return 902000 + chan * 500;
 	case MORSE_EU:
+	case MORSE_GB:
 		if (chan < 31)
 			return 863000 + chan * 500;
 		else
@@ -633,6 +650,7 @@ int morse_dot11ah_freq_khz_bw_mhz_to_chan(u32 freq, u8 bw)
 		channel = (freq - 902000) /  500;
 		break;
 	case MORSE_EU:
+	case MORSE_GB:
 		if (freq > 901400)
 			channel = (freq - 901400) / 500;
 		else
@@ -697,6 +715,21 @@ int morse_dot11ah_get_pri_1mhz_chan(int primary_channel,
 }
 EXPORT_SYMBOL(morse_dot11ah_get_pri_1mhz_chan);
 
+int morse_dot11ah_ignore_channel(int chan_s1g)
+{
+	int ch;
+
+	for (ch = 0; ch < __mors_s1g_map->num_mapped_channels; ch++) {
+		if (chan_s1g ==  __mors_s1g_map->s1g_channels[ch].ch.hw_value) {
+			__mors_s1g_map->s1g_channels[ch].ch.flags |= IEEE80211_CHAN_IGNORE;
+			return 0;
+		}
+	}
+
+	return -ENOENT;
+}
+EXPORT_SYMBOL(morse_dot11ah_ignore_channel);
+
 int morse_dot11ah_get_num_channels(void)
 {
 	if (!__mors_s1g_map)
@@ -708,6 +741,7 @@ EXPORT_SYMBOL(morse_dot11ah_get_num_channels);
 int morse_dot11ah_fill_channel_list(struct morse_channel *list)
 {
 	int i;
+	int count = 0;
 	struct morse_channel *chan;
 	const struct morse_dot11ah_channel *map_entry;
 
@@ -716,14 +750,20 @@ int morse_dot11ah_fill_channel_list(struct morse_channel *list)
 
 	for (i = 0; i < __mors_s1g_map->num_mapped_channels; i++) {
 		map_entry = &__mors_s1g_map->s1g_channels[i];
-		chan = &list[i];
+		chan = &list[count];
+
+		/* Skip ignored channels */
+		if (map_entry->ch.flags & IEEE80211_CHAN_IGNORE)
+			continue;
+
 		chan->frequency_khz = ieee80211_channel_to_khz(&map_entry->ch);
 		chan->channel_s1g = map_entry->ch.hw_value;
 		chan->channel_5g = map_entry->hw_value_map;
 		/* extract the s1g bandwidth from the channel flags */
 		chan->bandwidth_mhz = ch_flag_to_chan_bw(map_entry->ch.flags);
+		count++;
 	}
 
-	return __mors_s1g_map->num_mapped_channels;
+	return count;
 }
 EXPORT_SYMBOL(morse_dot11ah_fill_channel_list);

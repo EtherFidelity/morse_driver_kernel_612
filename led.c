@@ -12,6 +12,20 @@
 #include <linux/leds.h>
 #include <linux/workqueue.h>
 
+/* This is based on the iwlwifi.c blink rates. */
+static const struct ieee80211_tpt_blink morse_blink[] = {
+	{ .throughput = 0, .blink_time = 334 },
+	{ .throughput = 512 - 1, .blink_time = 260 },
+	{ .throughput = 1024 - 1, .blink_time = 220 },
+	{ .throughput = 2 * 1024 - 1, .blink_time = 190 },
+	{ .throughput = 4 * 1024 - 1, .blink_time = 170 },
+	{ .throughput = 7 * 1024 - 1, .blink_time = 150 },
+	{ .throughput = 11 * 1024 - 1, .blink_time = 130 },
+	{ .throughput = 16 * 1024 - 1, .blink_time = 110 },
+	{ .throughput = 22 * 1024 - 1, .blink_time = 80 },
+	{ .throughput = 29 * 1024 - 1, .blink_time = 50 },
+};
+
 static void morse_led_callback(struct led_classdev *led_cdev, enum led_brightness brightness)
 {
 	struct morse_led *led = container_of(led_cdev, struct morse_led, led_cdev);
@@ -42,7 +56,7 @@ static int morse_led_feature_enabled(struct morse *mors)
 	return  !morse_mac_ps_enabled(mors) && mors->cfg->led_group.enable_led_support;
 }
 
-int morse_led_register(struct morse *mors, struct morse_led *led, int pin_num,
+static int morse_led_register(struct morse *mors, struct morse_led *led, int pin_num,
 			const char *name, enum led_mode mode)
 {
 	int ret = 0;
@@ -78,6 +92,12 @@ int morse_led_register(struct morse *mors, struct morse_led *led, int pin_num,
 		break;
 	case MORSE_LED_RADIO:
 		led->led_cdev.default_trigger = ieee80211_get_radio_led_name(mors->hw);
+		break;
+	case MORSE_LED_TPT:
+		led->led_cdev.default_trigger =
+			ieee80211_create_tpt_led_trigger(mors->hw,
+					IEEE80211_TPT_LEDTRIG_FL_CONNECTED,
+					morse_blink, ARRAY_SIZE(morse_blink));
 		break;
 	case MORSE_LED_USER_DEF:
 		/* Still register led but defer control to user space */
@@ -123,7 +143,7 @@ void morse_led_init(struct morse *mors)
 	led_group->num_leds = NUM_LEDS;
 
 	morse_led_register(mors, &led_group->leds[0], LED_G, "morse_led0", MORSE_LED_ASSOC);
-	morse_led_register(mors, &led_group->leds[1], LED_R, "morse_led1", MORSE_LED_RX);
+	morse_led_register(mors, &led_group->leds[1], LED_R, "morse_led1", MORSE_LED_TPT);
 	morse_led_register(mors, &led_group->leds[2], LED_PWR, "morse_led2", MORSE_LED_HOST);
 }
 
@@ -147,6 +167,7 @@ void morse_led_exit(struct morse *mors)
 		case MORSE_LED_RX:
 		case MORSE_LED_ASSOC:
 		case MORSE_LED_RADIO:
+		case MORSE_LED_TPT:
 		case MORSE_LED_USER_DEF:
 			led_classdev_unregister(&led->led_cdev);
 			cancel_work_sync(&led->work);

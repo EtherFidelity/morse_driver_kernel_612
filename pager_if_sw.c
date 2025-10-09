@@ -559,12 +559,14 @@ int morse_pager_sw_pagesets_init(struct morse *mors)
 	mors->chip_if->from_chip_pageset = &mors->chip_if->pagesets[1];
 	INIT_WORK(&mors->chip_if_work, morse_pagesets_work);
 	INIT_WORK(&mors->tx_stale_work, morse_pagesets_stale_tx_work);
-	INIT_KFIFO(mors->chip_if->tx_status_addrs);
+	INIT_KFIFO(mors->chip_if->bypass.tx_sts.to_process);
+	INIT_KFIFO(mors->chip_if->bypass.cmd_resp.to_process);
 
 	/* Enable interrupts */
 	morse_pager_irq_enable(tx_return, true);
 	morse_pager_irq_enable(rx_data, true);
 	morse_pager_tx_status_irq_enable(mors, true);
+	morse_pager_cmd_resp_irq_enable(mors, true);
 	morse_hw_enable_stop_notifications(mors, true);
 
 	morse_release_bus(mors);
@@ -612,6 +614,7 @@ void morse_pager_sw_pagesets_finish(struct morse *mors)
 	cancel_work_sync(&mors->tx_stale_work);
 
 	morse_pager_tx_status_irq_enable(mors, false);
+	morse_pager_cmd_resp_irq_enable(mors, false);
 	for (pager = mors->chip_if->pagers, count = 0;
 	     count < mors->chip_if->pager_count; pager++, count++) {
 		morse_pager_irq_enable(pager, false);

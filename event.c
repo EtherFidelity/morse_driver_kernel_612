@@ -94,7 +94,7 @@ int morse_mac_event_recv(struct morse *mors, struct sk_buff *skb)
 			(struct morse_cmd_evt_sig_field_error *)event;
 
 #ifdef CONFIG_MORSE_MONITOR
-		if (mors->hw->conf.flags & IEEE80211_CONF_MONITOR)
+		if (mors->monitor_mode)
 			morse_mon_sig_field_error(sig_field_error_evt);
 #endif
 
@@ -107,27 +107,18 @@ int morse_mac_event_recv(struct morse *mors, struct sk_buff *skb)
 		break;
 	}
 	case MORSE_CMD_ID_EVT_UMAC_TRAFFIC_CONTROL: {
-		/* Event size from older firmware revisions */
-		const int legacy_evt_len = 3;
 		struct morse_cmd_evt_umac_traffic_control *umac_traffic_control =
 			(struct morse_cmd_evt_umac_traffic_control *)event;
-		int sources = MORSE_CMD_UMAC_TRAFFIC_CONTROL_SOURCE_TWT;
-
-		if (le16_to_cpu(event->hdr.len) > legacy_evt_len)
-			/* This event includes the source bitfield (potentially
-			 * more sources than just twt).
-			 */
-			sources = le32_to_cpu(umac_traffic_control->sources);
 
 		if (is_fullmac_mode()) {
 			ret = morse_wiphy_traffic_control(mors,
 						umac_traffic_control->pause_data_traffic,
-						sources);
+						le32_to_cpu(umac_traffic_control->sources));
 		} else {
 			ret = morse_mac_traffic_control(mors,
 						le16_to_cpu(umac_traffic_control->hdr.vif_id),
 						umac_traffic_control->pause_data_traffic,
-						sources);
+						le32_to_cpu(umac_traffic_control->sources));
 		}
 
 		break;
@@ -171,8 +162,21 @@ int morse_mac_event_recv(struct morse *mors, struct sk_buff *skb)
 	case MORSE_CMD_ID_EVT_CONNECTED: {
 		struct morse_cmd_evt_connected *connected =
 			(struct morse_cmd_evt_connected *)event;
+		u16 event_len = le16_to_cpu(event->hdr.len) + sizeof(*event);
+		u16 ies_len;
+		u8 *ies;
 
-		morse_wiphy_connected(mors, connected->bssid);
+		if (event_len >= sizeof(*connected) &&
+		    event_len >= (sizeof(*connected) +
+		    le16_to_cpu(connected->assoc_resp_ies_len))) {
+			ies = connected->assoc_resp_ies;
+			ies_len = le16_to_cpu(connected->assoc_resp_ies_len);
+		} else {
+			ies = NULL;
+			ies_len = 0;
+		}
+
+		morse_wiphy_connected(mors, connected->bssid, ies, ies_len);
 
 		ret = 0;
 
@@ -228,6 +232,28 @@ int morse_mac_event_recv(struct morse *mors, struct sk_buff *skb)
 		morse_sched_scan_results_evt(mors->hw);
 
 		ret = 0;
+
+		break;
+	}
+	case MORSE_CMD_ID_EVT_CQM_RSSI_NOTIFY: {
+		struct morse_cmd_evt_cqm_rssi_notify *cqm_notify =
+			(struct morse_cmd_evt_cqm_rssi_notify *)event;
+		struct ieee80211_vif *vif = morse_get_vif_from_vif_id(mors, vif_id);
+
+		ret = morse_cqm_rssi_notify_event(mors, vif, cqm_notify);
+
+		break;
+	}
+
+	case MORSE_CMD_ID_EVT_BEACON_FILTER_MATCH: {
+		/* This event is for FullMAC only. */
+		struct morse_cmd_evt_beacon_filter_match *filter_match =
+			(struct morse_cmd_evt_beacon_filter_match *)event;
+		struct morse_vif *mors_vif = morse_wiphy_get_sta_vif(mors);
+
+		ret = morse_vendor_ie_process_rx_ies(&mors_vif->wdev, filter_match->ies,
+						     le32_to_cpu(filter_match->ies_len),
+						     MORSE_VENDOR_IE_TYPE_BEACON);
 
 		break;
 	}

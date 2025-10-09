@@ -39,6 +39,10 @@
 #define MORSE_PAGER_IRQ_BYPASS_TX_STATUS_AVAILABLE	BIT(MORSE_PAGER_BYPASS_TX_STATUS_IRQ_NUM)
 #define MORSE_PAGER_BYPASS_TX_STATUS_FIFO_DEPTH		(4)
 
+#define MORSE_PAGER_BYPASS_CMD_RESP_IRQ_NUM		(29)
+#define MORSE_PAGER_IRQ_BYPASS_CMD_RESP_AVAILABLE	BIT(MORSE_PAGER_BYPASS_CMD_RESP_IRQ_NUM)
+#define MORSE_PAGER_BYPASS_CMD_RESP_FIFO_DEPTH		(2)
+
 struct morse;
 struct morse_pageset;
 struct morse_page;
@@ -179,6 +183,17 @@ int morse_pager_irq_enable(const struct morse_pager *pager, bool enable);
  * Returns: 0 on success, else error code
  */
 int morse_pager_tx_status_irq_enable(struct morse *mors, bool enable);
+
+/**
+ * morse_pager_cmd_resp_irq_enable() - Enables/disables interrupt for cmd
+ * responses to bypass the pager
+ *
+ * @mors Mors object.
+ * @enable Set to true for enable.
+ *
+ * Returns: 0 on success, else error code
+ */
+int morse_pager_cmd_resp_irq_enable(struct morse *mors, bool enable);
 
 /**
  * Default IRQ handler for the pager

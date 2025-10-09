@@ -454,7 +454,7 @@ EXPORT_SYMBOL(morse_dot11ah_is_page_slicing_enabled_on_bss);
 module_init(morse_dot11ah_init);
 module_exit(morse_dot11ah_exit);
 
-MODULE_AUTHOR("Morse Micro, Inc.");
+MODULE_AUTHOR("Morse Micro");
 MODULE_DESCRIPTION("S1G support for Morse Micro drivers");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(DOT11AH_VERSION);

@@ -1103,9 +1103,10 @@ int morse_ops_hw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		 * higher priority. Userspace applications can restart scheduled scans if
 		 * appropiate.
 		 */
-		morse_hw_sched_scan_interrupt(mors);
+		mutex_unlock(&mors->lock);
+		morse_hw_stop_sched_scan(mors, false);
+		mutex_lock(&mors->lock);
 		mors->hw_scan.state = HW_SCAN_STATE_RUNNING;
-		reinit_completion(&mors->hw_scan.scan_done);
 		break;
 	case HW_SCAN_STATE_IDLE:
 		mors->hw_scan.state = HW_SCAN_STATE_RUNNING;
@@ -1113,6 +1114,7 @@ int morse_ops_hw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		break;
 	case HW_SCAN_STATE_RUNNING:
 	case HW_SCAN_STATE_ABORTING:
+	case HW_SCAN_STATE_SCHED_STOPPING:
 		ret = -EBUSY;
 		goto exit;
 	}
@@ -1188,6 +1190,7 @@ static void cancel_hw_scan(struct morse *mors)
 	switch (mors->hw_scan.state) {
 	case HW_SCAN_STATE_IDLE:
 	case HW_SCAN_STATE_SCHED:
+	case HW_SCAN_STATE_SCHED_STOPPING:
 		/* sched scan running ignore request */
 	case HW_SCAN_STATE_ABORTING:
 		/* scan not running */
@@ -1205,8 +1208,8 @@ static void cancel_hw_scan(struct morse *mors)
 	mutex_unlock(&mors->lock);
 
 	if (ret ||
-		!mors->started ||
-		!wait_for_completion_timeout(&mors->hw_scan.scan_done, 1 * HZ)) {
+	    !mors->started ||
+	    !wait_for_completion_timeout(&mors->hw_scan.scan_done, 1 * HZ)) {
 		/* We may have lost the event on the bus, the chip could be wedged, or the cmd
 		 * failed for another reason.
 		 * Nevertheless, we should call the done event so mac80211 knows to unblock itself
@@ -1246,10 +1249,15 @@ void morse_hw_scan_done_event(struct ieee80211_hw *hw)
 	case HW_SCAN_STATE_IDLE:
 		/* Scan has already been stopped. Just continue */
 		goto exit;
-	case HW_SCAN_STATE_SCHED:
-		/* Sched scan should supress these events. If seen something has gone wrong */
-		ieee80211_sched_scan_stopped(mors->hw);
+
+	case HW_SCAN_STATE_SCHED_STOPPING:
+		/* A scheduled scan has finished */
 		mors->hw_scan.state = HW_SCAN_STATE_IDLE;
+		goto exit;
+	case HW_SCAN_STATE_SCHED:
+		/* Scheduled scan stopped without request, let mac80211 know */
+		mors->hw_scan.state = HW_SCAN_STATE_IDLE;
+		ieee80211_sched_scan_stopped(mors->hw);
 		goto exit;
 	case HW_SCAN_STATE_RUNNING:
 	case HW_SCAN_STATE_ABORTING:
@@ -1289,23 +1297,6 @@ void morse_hw_scan_destroy(struct morse *mors)
 		hw_scan_clean_up_params(mors->hw_scan.params);
 	kfree(mors->hw_scan.params);
 	mors->hw_scan.params = NULL;
-}
-
-void morse_hw_sched_scan_interrupt(struct morse *mors)
-{
-	struct morse_hw_scan_params params = {0};
-
-	lockdep_assert_held(&mors->lock);
-	if (mors->hw_scan.state != HW_SCAN_STATE_SCHED)
-		return;
-
-	MORSE_HWSCAN_INFO(mors, "hw scan: interrupting scheduled scan\n");
-	params.operation = MORSE_HW_SCAN_OP_SCHED_STOP;
-
-	morse_cmd_hw_scan(mors, &params, false, NULL);
-	complete(&mors->hw_scan.scan_done);
-	ieee80211_sched_scan_stopped(mors->hw);
-	mors->hw_scan.state = HW_SCAN_STATE_IDLE;
 }
 
 void morse_hw_sched_scan_finish(struct morse *mors)
@@ -1372,6 +1363,7 @@ int morse_ops_sched_scan_start(struct ieee80211_hw *hw, struct ieee80211_vif *vi
 		ret = -EBUSY;
 		goto exit;
 	case HW_SCAN_STATE_ABORTING:
+	case HW_SCAN_STATE_SCHED_STOPPING:
 		ret = -EBUSY;
 		goto exit;
 	}
@@ -1422,9 +1414,10 @@ exit:
 	return ret;
 }
 
-static void stop_sched_scan(struct morse *mors)
+void morse_hw_stop_sched_scan(struct morse *mors, bool requested)
 {
 	struct morse_hw_scan_params params = {0};
+	int ret;
 
 	mutex_lock(&mors->lock);
 
@@ -1434,19 +1427,39 @@ static void stop_sched_scan(struct morse *mors)
 	case HW_SCAN_STATE_IDLE:
 	case HW_SCAN_STATE_RUNNING:
 	case HW_SCAN_STATE_ABORTING:
+	case HW_SCAN_STATE_SCHED_STOPPING:
 		/* scan not running */
 		mutex_unlock(&mors->lock);
 		return;
 	case HW_SCAN_STATE_SCHED:
-		mors->hw_scan.state = HW_SCAN_STATE_IDLE;
 		break;
 	}
 
+	mors->hw_scan.state = HW_SCAN_STATE_SCHED_STOPPING;
 	params.operation = MORSE_HW_SCAN_OP_SCHED_STOP;
 
-	morse_cmd_hw_scan(mors, &params, false, NULL);
-	complete(&mors->hw_scan.scan_done);
+	ret = morse_cmd_hw_scan(mors, &params, false, NULL);
+
 	mutex_unlock(&mors->lock);
+
+	if (ret ||
+	    !mors->started ||
+	    !wait_for_completion_timeout(&mors->hw_scan.scan_done, 1 * HZ)) {
+		/* We may have lost the event on the bus, the chip could be wedged, or the cmd
+		 * failed for another reason.
+		 * Nevertheless, we should return early so mac80211 knows to unblock itself
+		 */
+		mutex_lock(&mors->lock);
+		mors->hw_scan.state = HW_SCAN_STATE_IDLE;
+		mutex_unlock(&mors->lock);
+	}
+
+	/* If we weren't requested to stop let mac80211 know that we have */
+	if (!requested) {
+		mutex_lock(&mors->lock);
+		ieee80211_sched_scan_stopped(mors->hw);
+		mutex_unlock(&mors->lock);
+	}
 }
 
 int morse_ops_sched_scan_stop(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
@@ -1454,6 +1467,6 @@ int morse_ops_sched_scan_stop(struct ieee80211_hw *hw, struct ieee80211_vif *vif
 	struct morse *mors = hw->priv;
 
 	MORSE_HWSCAN_INFO(mors, "sched scan stopped\n");
-	stop_sched_scan(mors);
+	morse_hw_stop_sched_scan(mors, true);
 	return 0;
 }
