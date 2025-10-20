@@ -1,13 +1,17 @@
-Cross-compile driver 
---------------------
+Enable DMKS building of these modules:
 
-To cross-compile, you will need a compiled kernel to build against.
+VER=1.16.4-k612
+sudo mkdir -p /usr/src/morse-$VER
+sudo git clone --recursive https://github.com/EtherFidelity/morse_driver_kernel_612.git /usr/src/morse-$VER
+sudo dkms add -m morse -v $VER
+sudo dkms build -m morse -v $VER
+sudo dkms install -m morse -v $VER
 
-To compile the driver, make sure your cross-compiler is in your PATH.
+You'll still need the firmware:
 
-Then build the driver:
-
-(Update ARCH, CROSS_COMPILE and KERNEL_SRC as appropriate)
-
-    make MORSE_TRACE_PATH=`pwd` ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KERNEL_SRC=~/linux CONFIG_WLAN_VENDOR_MORSE=m CONFIG_MORSE_SDIO=y CONFIG_MORSE_USER_ACCESS=y
+sudo mkdir -p /lib/firmware/morse
+cd /lib/firmware/morse
+sudo wget https://github.com/MorseMicro/firmware_binaries/releases/download/v1.15.3/morsemicro-fw-rel_1_15_3_2025_Apr_16.tar
+sudo tar -xf morsemicro-fw-rel_1_15_3_2025_Apr_16.tar -C /
+sudo rm morsemicro-fw-rel_1_15_3_2025_Apr_16.tar
 
