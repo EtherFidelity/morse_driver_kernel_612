@@ -86,3 +86,31 @@ static inline u8 ieee80211_get_tid(struct ieee80211_hdr *hdr)
 }
 #endif
 #define MORSE_IEEE80211_GET_TID(_hdr) ieee80211_get_tid(_hdr)
+
+/* ---- Linux 6.12 compatibility shims for cfg80211/mac80211 API changes ---- */
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,12,0)
+
+/* Flag removed upstream; old code tests it. Make it a no-op. */
+#ifndef IEEE80211_CHAN_IGNORE
+#define IEEE80211_CHAN_IGNORE 0
+#endif
+
+/* Old code references bcn->u.s1g_short_beacon.variable; map to s1g_beacon. */
+#ifndef s1g_short_beacon
+#define s1g_short_beacon s1g_beacon
+#endif
+
+/* Helper signature changed in 6.12. Old code calls it with 1 arg.
+ * Redirect those calls to a wrapper that returns false (so code paths fall back
+ * to s1g_beacon.variable, which is valid in 6.12+).
+ */
+#ifndef MORSE_K612_SHORT_BCN_WRAPPER
+#include <linux/ieee80211.h>
+static inline bool morse_ieee80211_is_s1g_short_beacon(__le16 fc) { (void)fc; return false; }
+/* Accept any 1+ args and drop extras; maps old call forms to our wrapper. */
+#define ieee80211_is_s1g_short_beacon(...) morse_ieee80211_is_s1g_short_beacon(__VA_ARGS__)
+#define MORSE_K612_SHORT_BCN_WRAPPER 1
+#endif
+
+#endif /* >= 6.12.0 */

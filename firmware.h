@@ -1,3 +1,4 @@
+enum morse_config_test_mode;
 #ifndef _MORSE_FW_H_
 #define _MORSE_FW_H_
 
@@ -146,7 +147,7 @@ struct extended_host_table {
 	u8 ext_host_table_data_tlvs[];
 } __packed;
 
-int morse_firmware_init(struct morse *mors, uint test_mode);
+int morse_firmware_init(struct morse *mors, enum morse_config_test_mode test_mode);
 
 /**
  * @brief Do necessary preparation and then initialise firmware
