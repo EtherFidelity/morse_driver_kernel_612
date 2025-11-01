@@ -10,6 +10,7 @@
  */
 
 #include "dot11ah/s1g_ieee80211.h"
+
 #pragma once
 
 /* Checkpatch does not like Camel Case */
@@ -32,6 +33,13 @@
 #define fallthrough	do {} while (0)	/* fallthrough */
 #endif
 #endif
+#endif
+
+/* Enable GPIO-descriptor CS path for modern kernels by default */
+#ifndef SPI_CONTROLLER_ENABLE_CS_GPIOD
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
+#  define SPI_CONTROLLER_ENABLE_CS_GPIOD 1
+# endif
 #endif
 
 #if !defined(struct_size)
